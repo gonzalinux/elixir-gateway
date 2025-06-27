@@ -1,2 +1,7 @@
 # Project exclude paths
 /deps/
+/.idea
+/deps
+/_build
+/priv/certs
+/priv/site_encrypt
