@@ -1,5 +1,5 @@
-defmodule ExgatewayWeb.Endpoint do
-  use SiteEncrypt.Phoenix.Endpoint, otp_app: :exgateway
+defmodule ElixirGatewayWeb.Endpoint do
+  use SiteEncrypt.Phoenix.Endpoint, otp_app: :elixirgateway
 
   @impl SiteEncrypt
   def certification do
@@ -9,8 +9,8 @@ defmodule ExgatewayWeb.Endpoint do
       # host machine.
       client: :certbot,
 
-      domains: Exgateway.SiteEncrypt.get_domains(),
-      emails: [Exgateway.SiteEncrypt.get_email()],
+      domains: ElixirGateway.SiteEncrypt.get_domains(),
+      emails: [ElixirGateway.SiteEncrypt.get_email()],
 
       # By default the certs will be stored in tmp/site_encrypt_db, which is convenient for
       # local development. Make sure that tmp folder is gitignored.
@@ -25,6 +25,7 @@ defmodule ExgatewayWeb.Endpoint do
       directory_url:
         case Mix.env() || :dev do
           :dev -> {:internal, port: 4002}
+          :test -> {:internal, port: 4002}
           :stage -> "https://acme-staging-v02.api.letsencrypt.org/directory"
           :prod -> "https://acme-v02.api.letsencrypt.org/directory"
         end
@@ -37,7 +38,7 @@ defmodule ExgatewayWeb.Endpoint do
   # Set :encryption_salt if you would also like to encrypt it.
   @session_options [
     store: :cookie,
-    key: "_exgateway_key",
+    key: "_elixirgateway_key",
     signing_salt: "M6TOtxbf",
     same_site: "Lax"
   ]
@@ -76,5 +77,5 @@ defmodule ExgatewayWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
-  plug ExgatewayWeb.Router
+  plug ElixirGatewayWeb.Router
 end

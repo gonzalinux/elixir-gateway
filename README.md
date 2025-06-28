@@ -21,7 +21,7 @@ A high-performance API Gateway built with Phoenix that provides domain-based rou
 
 2. **Configure services** in `config/dev.exs`:
    ```elixir
-   config :exgateway, :gateway,
+   config :elixir_gateway, :gateway,
      services: %{
        "api.yourdomain.com" => "http://192.168.1.10:8080",
        "app.yourdomain.com" => "https://192.168.1.11:4000"

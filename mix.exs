@@ -1,9 +1,9 @@
-defmodule Exgateway.MixProject do
+defmodule ElixirGateway.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :exgateway,
+      app: :elixirgateway,
       version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -18,7 +18,7 @@ defmodule Exgateway.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {Exgateway.Application, []},
+      mod: {ElixirGateway.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -45,7 +45,9 @@ defmodule Exgateway.MixProject do
       {:prom_ex, "~> 1.9"},
       {:site_encrypt, "~> 0.6"},
       {:gun, "~> 2.0"},
-      {:tidewave, "~> 0.1", only: :dev}
+      {:tidewave, "~> 0.1", only: :dev},
+      {:bypass, "~> 2.1", only: :test},
+      {:mock, "~> 0.3.0", only: :test}
     ]
   end
 

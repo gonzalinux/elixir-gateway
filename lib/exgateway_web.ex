@@ -1,12 +1,12 @@
-defmodule ExgatewayWeb do
+defmodule ElixirGatewayWeb do
   @moduledoc """
   The entrypoint for defining your web interface, such
   as controllers, components, channels, and so on.
 
   This can be used in your application as:
 
-      use ExgatewayWeb, :controller
-      use ExgatewayWeb, :html
+      use ElixirGatewayWeb, :controller
+      use ElixirGatewayWeb, :html
 
   The definitions below will be executed for every controller,
   component, etc, so keep them short and clean, focused
@@ -39,7 +39,7 @@ defmodule ExgatewayWeb do
     quote do
       use Phoenix.Controller,
         formats: [:html, :json],
-        layouts: [html: ExgatewayWeb.Layouts]
+        layouts: [html: ElixirGatewayWeb.Layouts]
 
       import Plug.Conn
 
@@ -50,9 +50,9 @@ defmodule ExgatewayWeb do
   def verified_routes do
     quote do
       use Phoenix.VerifiedRoutes,
-        endpoint: ExgatewayWeb.Endpoint,
-        router: ExgatewayWeb.Router,
-        statics: ExgatewayWeb.static_paths()
+        endpoint: ElixirGatewayWeb.Endpoint,
+        router: ElixirGatewayWeb.Router,
+        statics: ElixirGatewayWeb.static_paths()
     end
   end
 

@@ -8,7 +8,7 @@ Complete configuration and deployment instructions for ExGateway.
 Edit your configuration file to map domains to internal services:
 
 ```elixir
-config :exgateway, :gateway,
+config :elixir_gateway, :gateway,
   services: %{
     "api.example.com" => "http://192.168.1.10:8080",
     "admin.example.com" => "https://192.168.1.11:8443"
@@ -90,7 +90,7 @@ Available metrics:
 ### Rate Limiting
 Configure rate limits per user:
 ```elixir
-config :exgateway, :gateway,
+config :elixir_gateway, :gateway,
   rate_limit: [
     requests_per_minute: 100,
     cleanup_interval: :timer.minutes(1)
@@ -102,3 +102,24 @@ config :exgateway, :gateway,
 - No sensitive information is logged
 - End-to-end connection security maintained
 - CORS headers passed through from backend services
+
+### Environment Variables for Production
+
+**Required for Production:**
+```bash
+# Generate a secret key for production
+export SECRET_KEY_BASE=$(mix phx.gen.secret)
+
+# Optional: Set custom host and port
+export PHX_HOST="yourdomain.com"
+export PORT="4442"
+
+# For Let's Encrypt SSL
+export LETSENCRYPT_DOMAINS="api.yourdomain.com,service1.yourdomain.com"
+export LETSENCRYPT_EMAIL="admin@yourdomain.com"
+```
+
+**Security Note:**
+- Development uses a hardcoded `secret_key_base` for convenience
+- Production requires `SECRET_KEY_BASE` environment variable for security
+- Never use development secrets in production environments

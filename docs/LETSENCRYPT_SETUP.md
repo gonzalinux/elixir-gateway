@@ -16,11 +16,11 @@ export LETSENCRYPT_EMAIL="admin@yourdomain.com"
 # Optional: Use staging environment for testing (default: false)
 export LETSENCRYPT_STAGING="true"
 
-# Optional: Organization name (default: "Exgateway API Gateway")
+# Optional: Organization name (default: "ElixirGateway API Gateway")
 export LETSENCRYPT_ORGANIZATION="Your Company Name"
 
-# Optional: Certificate storage path (default: /etc/exgateway/certs)
-export CERT_DB_FOLDER="/opt/exgateway/certs"
+# Optional: Certificate storage path (default: /etc/elixir_gateway/certs)
+export CERT_DB_FOLDER="/opt/elixir_gateway/certs"
 ```
 
 ### 2. **DNS Configuration**
@@ -45,7 +45,7 @@ LETSENCRYPT_ENABLED=true mix phx.server
 
 # Or with releases
 MIX_ENV=prod mix release
-_build/prod/rel/exgateway/bin/exgateway start
+_build/prod/rel/elixir_gateway/bin/elixir_gateway start
 ```
 
 **Note**: SiteEncrypt only starts in production by default. In development, set `LETSENCRYPT_ENABLED=true` to test Let's Encrypt functionality.
@@ -60,7 +60,7 @@ _build/prod/rel/exgateway/bin/exgateway start
 ## 📁 File Structure
 
 ```
-/etc/exgateway/certs/          # Certificate storage (configurable)
+/etc/elixir_gateway/certs/          # Certificate storage (configurable)
 ├── account_key.pem            # Let's Encrypt account key
 ├── cert.pem                   # SSL certificate
 ├── chain.pem                  # Certificate chain
@@ -87,9 +87,9 @@ MIX_ENV=prod mix phx.server
 ### Certificate Storage Permissions
 ```bash
 # Ensure proper permissions
-sudo mkdir -p /etc/exgateway/certs
-sudo chown -R exgateway:exgateway /etc/exgateway/certs
-sudo chmod 700 /etc/exgateway/certs
+sudo mkdir -p /etc/elixir_gateway/certs
+sudo chown -R elixir_gateway:elixir_gateway /etc/elixir_gateway/certs
+sudo chmod 700 /etc/elixir_gateway/certs
 ```
 
 ### Firewall Configuration
@@ -107,7 +107,7 @@ sudo ufw allow 443/tcp
 Check certificate status in the logs:
 ```bash
 # Look for SiteEncrypt messages
-journalctl -u exgateway -f | grep -i "certificate"
+journalctl -u elixir_gateway -f | grep -i "certificate"
 ```
 
 ### Automatic Notifications
@@ -137,10 +137,10 @@ The gateway logs certificate events:
 
 3. **Certificate Storage Permission Denied**
    ```
-   Error: Permission denied writing to /etc/exgateway/certs
+   Error: Permission denied writing to /etc/elixir_gateway/certs
    ```
    - Check directory permissions
-   - Ensure exgateway user owns the directory
+   - Ensure elixir_gateway user owns the directory
 
 ### Debug Mode
 Enable debug logging:
@@ -154,13 +154,13 @@ MIX_ENV=prod mix phx.server
 ### Force Certificate Renewal
 ```elixir
 # In IEx console
-SiteEncrypt.force_renew(Exgateway.SiteEncrypt)
+SiteEncrypt.force_renew(ElixirGateway.SiteEncrypt)
 ```
 
 ### Check Certificate Expiry
 ```bash
 # Check certificate expiry date
-openssl x509 -in /etc/exgateway/certs/cert.pem -noout -dates
+openssl x509 -in /etc/elixir_gateway/certs/cert.pem -noout -dates
 ```
 
 ## 🌐 Multiple Domain Support
@@ -181,19 +181,19 @@ export LETSENCRYPT_DOMAINS="api.company1.com,service.company2.com,admin.company3
 
 ### Systemd Service
 ```ini
-# /etc/systemd/system/exgateway.service
+# /etc/systemd/system/elixir_gateway.service
 [Unit]
 Description=ExGateway API Gateway
 After=network.target
 
 [Service]
 Type=exec
-User=exgateway
-Group=exgateway
+User=elixir_gateway
+Group=elixir_gateway
 Environment=LETSENCRYPT_DOMAINS=api.yourdomain.com,service1.yourdomain.com
 Environment=LETSENCRYPT_EMAIL=admin@yourdomain.com
-Environment=CERT_DB_FOLDER=/etc/exgateway/certs
-ExecStart=/opt/exgateway/bin/exgateway start
+Environment=CERT_DB_FOLDER=/etc/elixir_gateway/certs
+ExecStart=/opt/elixir_gateway/bin/elixir_gateway start
 Restart=always
 RestartSec=5
 
@@ -204,12 +204,12 @@ WantedBy=multi-user.target
 ### Docker Deployment
 ```dockerfile
 # Dockerfile additions for Let's Encrypt
-RUN mkdir -p /etc/exgateway/certs
-VOLUME ["/etc/exgateway/certs"]
+RUN mkdir -p /etc/elixir_gateway/certs
+VOLUME ["/etc/elixir_gateway/certs"]
 
 ENV LETSENCRYPT_DOMAINS=""
 ENV LETSENCRYPT_EMAIL=""
-ENV CERT_DB_FOLDER="/etc/exgateway/certs"
+ENV CERT_DB_FOLDER="/etc/elixir_gateway/certs"
 
 EXPOSE 80 443
 ```

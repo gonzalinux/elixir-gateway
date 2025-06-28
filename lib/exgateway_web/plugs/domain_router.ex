@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.Plugs.DomainRouter do
+defmodule ElixirGatewayWeb.Plugs.DomainRouter do
   @moduledoc """
   Plug that determines the target service based on the incoming domain.
   """
@@ -10,7 +10,7 @@ defmodule ExgatewayWeb.Plugs.DomainRouter do
 
   def call(conn, _opts) do
     host = get_host(conn)
-    services = Application.get_env(:exgateway, :gateway)[:services] || %{}
+    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
     
     case Map.get(services, host) do
       nil ->
@@ -28,16 +28,20 @@ defmodule ExgatewayWeb.Plugs.DomainRouter do
   end
 
   defp get_host(conn) do
-    case get_req_header(conn, "host") do
-      [host | _] -> 
-        # Remove port if present
-        host
-        |> String.split(":")
-        |> List.first()
-      
-      [] ->
-      conn.host ||
-        "default"
+    if conn.host do
+    conn.host
+    else
+      case get_req_header(conn, "host") do
+        [host | _] ->
+          # Remove port if present
+          host
+          |> String.split(":")
+          |> List.first()
+
+        [] ->
+            "default"
+      end
     end
+
   end
 end

@@ -1,10 +1,10 @@
-defmodule ExgatewayWeb.GatewayController do
+defmodule ElixirGatewayWeb.GatewayController do
   @moduledoc """
   Controller that handles proxied requests.
   Note: Most of the work is done by plugs, this is mainly a fallback.
   """
   
-  use ExgatewayWeb, :controller
+  use ElixirGatewayWeb, :controller
   require Logger
 
   def proxy(conn, _params) do

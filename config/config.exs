@@ -7,12 +7,12 @@
 # General application configuration
 import Config
 
-config :exgateway,
+config :elixirgateway,
   generators: [timestamp_type: :utc_datetime]
 
 # Gateway configuration
 # Modify it with your proxied services
-config :exgateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
   # default is used when no host comes in the headers
     "default" => "http://localhost:8000",
@@ -25,14 +25,14 @@ config :exgateway, :gateway,
   ]
 
 # Configures the endpoint
-config :exgateway, ExgatewayWeb.Endpoint,
+config :elixirgateway, ElixirGatewayWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [json: ExgatewayWeb.ErrorJSON],
+    formats: [json: ElixirGatewayWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Exgateway.PubSub,
+  pubsub_server: ElixirGateway.PubSub,
   live_view: [signing_salt: "l5uDvTHO"]
 
 # Configures Elixir's Logger
@@ -44,8 +44,8 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 # Configure Finch for HTTP client
-config :exgateway, :finch,
-  name: Exgateway.Finch,
+config :elixirgateway, :finch,
+  name: ElixirGateway.Finch,
   pools: %{
     :default => [size: 25, max_idle_time: 30_000]
   }

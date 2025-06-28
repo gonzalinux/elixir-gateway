@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.GunWebSocketHandler do
+defmodule ElixirGatewayWeb.GunWebSocketHandler do
   @moduledoc """
   WebSocket handler that uses Gun to proxy WebSocket connections to target services.
   Implements WebSock behavior for compatibility with Phoenix WebSocket adapter.

@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.Plugs.RequestForwarder do
+defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   @moduledoc """
   Forwards HTTP requests to target services using Finch for high performance.
   """
@@ -41,7 +41,7 @@ defmodule ExgatewayWeb.Plugs.RequestForwarder do
       Logger.info("Built Finch request, executing...")
       
       # Execute request with shorter timeout
-      case Finch.request(finch_request, Exgateway.Finch, receive_timeout: 10_000, request_timeout: 10_000) do
+      case Finch.request(finch_request, ElixirGateway.Finch, receive_timeout: 10_000, request_timeout: 10_000) do
         {:ok, response} ->
           duration = System.monotonic_time() - start_time
           log_request(conn, response.status, duration)

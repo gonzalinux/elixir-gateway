@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.Plugs.RateLimiter do
+defmodule ElixirGatewayWeb.Plugs.RateLimiter do
   @moduledoc """
   Rate limiting plug using Hammer.
   """
@@ -9,7 +9,7 @@ defmodule ExgatewayWeb.Plugs.RateLimiter do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    rate_limit_config = Application.get_env(:exgateway, :gateway)[:rate_limit] || []
+    rate_limit_config = Application.get_env(:elixirgateway, :gateway)[:rate_limit] || []
     requests_per_minute = Keyword.get(rate_limit_config, :requests_per_minute, 100)
     
     user_id = get_user_identifier(conn)

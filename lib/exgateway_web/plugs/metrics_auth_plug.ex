@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.Plugs.MetricsAuthPlug do
+defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlug do
   @moduledoc """
   Plug to restrict metrics endpoint to private networks only.
   """

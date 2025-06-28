@@ -10,7 +10,7 @@ ExGateway implements a sophisticated WebSocket proxy that enables transparent pr
 
 The first component in the pipeline detects incoming WebSocket upgrade requests and initiates the proxy connection.
 
-**Location**: `lib/exgateway_web/plugs/websocket_upgrade_plug.ex`
+**Location**: `lib/elixirgateway_web/plugs/websocket_upgrade_plug.ex`
 
 **Key Responsibilities**:
 - Detects WebSocket upgrade requests by examining HTTP headers
@@ -28,7 +28,7 @@ Upgrade: websocket
 **Domain Routing**:
 Uses the same domain-to-service mapping from application configuration:
 ```elixir
-config :exgateway, :gateway,
+config :elixir_gateway, :gateway,
   services: %{
     "app.example.com" => "http://192.168.1.10:4000",
     "api.example.com" => "https://192.168.1.11:8080"
@@ -39,7 +39,7 @@ config :exgateway, :gateway,
 
 The actual WebSocket proxy implementation that manages the connection lifecycle and message forwarding.
 
-**Location**: `lib/exgateway_web/handlers/gun_websocket_handler.ex`
+**Location**: `lib/elixirgateway_web/handlers/gun_websocket_handler.ex`
 
 **Key Features**:
 - Implements the `WebSock` behavior for Phoenix compatibility
@@ -158,10 +158,10 @@ The WebSocket proxy integrates seamlessly with the existing gateway pipeline:
 
 ```elixir
 pipeline :gateway do
-  plug ExgatewayWeb.Plugs.RateLimiter        # Rate limiting applied
-  plug ExgatewayWeb.Plugs.WebSocketUpgradePlug # WebSocket detection
-  plug ExgatewayWeb.Plugs.DomainRouter        # HTTP fallback
-  plug ExgatewayWeb.Plugs.RequestForwarder    # HTTP forwarding
+  plug ElixirGatewayWeb.Plugs.RateLimiter        # Rate limiting applied
+  plug ElixirGatewayWeb.Plugs.WebSocketUpgradePlug # WebSocket detection
+  plug ElixirGatewayWeb.Plugs.DomainRouter        # HTTP fallback
+  plug ElixirGatewayWeb.Plugs.RequestForwarder    # HTTP forwarding
 end
 ```
 
@@ -188,7 +188,7 @@ While not explicitly LiveView-specific, this proxy architecture fully supports P
 WebSocket proxying uses the same configuration as HTTP proxying - no additional setup required:
 
 ```elixir
-config :exgateway, :gateway,
+config :elixir_gateway, :gateway,
   services: %{
     "liveview-app.com" => "http://localhost:4000",
     "websocket-api.com" => "https://internal.api:8080"

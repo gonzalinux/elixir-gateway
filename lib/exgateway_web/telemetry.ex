@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.Telemetry do
+defmodule ElixirGatewayWeb.Telemetry do
   use Supervisor
   import Telemetry.Metrics
 
@@ -64,7 +64,7 @@ defmodule ExgatewayWeb.Telemetry do
     [
       # A module, function and arguments to be invoked periodically.
       # This function must call :telemetry.execute/3 and a metric must be added above.
-      # {ExgatewayWeb, :count_users, []}
+      # {ElixirGatewayWeb, :count_users, []}
     ]
   end
 end

@@ -1,4 +1,4 @@
-defmodule ExgatewayWeb.Plugs.WebSocketUpgradePlug do
+defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
   @moduledoc """
   Plug that detects WebSocket upgrade requests and upgrades them to WebSocket connections.
   Uses Bandit's built-in WebSocket support.
@@ -34,7 +34,7 @@ defmodule ExgatewayWeb.Plugs.WebSocketUpgradePlug do
 
   defp handle_websocket_upgrade(conn) do
     host = conn.host
-    services = Application.get_env(:exgateway, :gateway)[:services] || %{}
+    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
     
     case Map.get(services, host) do
       nil ->
@@ -78,7 +78,7 @@ defmodule ExgatewayWeb.Plugs.WebSocketUpgradePlug do
         }
         
         conn
-        |> WebSockAdapter.upgrade(ExgatewayWeb.GunWebSocketHandler, state, [])
+        |> WebSockAdapter.upgrade(ElixirGatewayWeb.GunWebSocketHandler, state, [])
         |> halt()
     end
   end

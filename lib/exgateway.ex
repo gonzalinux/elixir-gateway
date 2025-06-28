@@ -1,6 +1,6 @@
-defmodule Exgateway do
+defmodule ElixirGateway do
   @moduledoc """
-  Exgateway keeps the contexts that define your domain
+  ElixirGateway keeps the contexts that define your domain
   and business logic.
 
   Contexts are also responsible for managing your data, regardless
