@@ -18,8 +18,8 @@ config :elixirgateway, ElixirGatewayWeb.Endpoint,
 # Example gateway services configuration for development
 config :elixirgateway, :gateway,
   services: %{
-    "default" => "http://192.168.2.151:4000",
-    "localhost" => "http://192.168.2.151:4000"
+    "default" => "http://localhost:5000",
+    "localhost" => "http://localhost:5000"
   },
   rate_limit: [
     requests_per_minute: 100,

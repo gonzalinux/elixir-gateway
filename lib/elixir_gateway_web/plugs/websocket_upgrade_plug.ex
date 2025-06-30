@@ -82,7 +82,7 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
         }
 
         conn
-        |> WebSockAdapter.upgrade(ElixirGatewayWeb.GunWebSocketHandler, state, [])
+        |> WebSockAdapter.upgrade(ElixirGatewayWeb.EnhancedGunWebSocketHandler, state, [])
         |> halt()
     end
   end

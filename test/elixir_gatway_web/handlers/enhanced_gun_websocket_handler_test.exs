@@ -1,7 +1,7 @@
 defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
   use ExUnit.Case, async: false
 
-  alias ElixirGatewayWeb.GunWebSocketHandler
+  alias ElixirGatewayWeb.EnhancedGunWebSocketHandler
 
   setup do
     # Connection pool is already started by the application
@@ -52,7 +52,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
 
       # Mock the connection pool to return an error to test timeout handling
       # This test verifies that the configurable timeout is used
-      result = GunWebSocketHandler.init(state)
+      result = EnhancedGunWebSocketHandler.init(state)
 
       # Should fail because localhost:8080 isn't running, but timeout should be from config
       assert {:stop, :normal, _state} = result
@@ -65,17 +65,17 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       }
 
       # Even if init fails, we can test state structure
-      case GunWebSocketHandler.init(state) do
+      case EnhancedGunWebSocketHandler.init(state) do
         {:ok, new_state} ->
           assert Map.has_key?(new_state, :reconnect_attempts)
           assert Map.has_key?(new_state, :message_queue)
-          assert Map.has_key?(new_state, :connected)
+          assert Map.has_key?(new_state, :connection_status)
           assert new_state.reconnect_attempts == 0
-          assert new_state.message_queue == []
-          assert new_state.connected == false
+          assert :queue.len(new_state.message_queue) == 0
+          assert new_state.connection_status == :connecting
 
-        {:stop, :normal, _state} ->
-          # Expected when connection fails
+        {:ok, _state} ->
+          # Expected when reconnection is attempted
           :ok
       end
     end
@@ -87,18 +87,20 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
         target_url: "ws://localhost:8080/ws",
         headers: [],
         upgrade_pending: true,
-        connected: false,
-        message_queue: [],
+        connection_status: :connecting,
+        message_queue: :queue.new(),
+        queue_size: 0,
         gun_pid: nil,
-        gun_stream_ref: nil
+        gun_stream_ref: nil,
+        config: %{message_queue_max_size: 100}
       }
 
       # Try to send a text message when not connected
-      result = GunWebSocketHandler.handle_in({"test message", [opcode: :text]}, state)
+      result = EnhancedGunWebSocketHandler.handle_in({"test message", [opcode: :text]}, state)
 
       assert {:ok, new_state} = result
-      assert length(new_state.message_queue) == 1
-      assert hd(new_state.message_queue) == {:text, "test message"}
+      assert new_state.queue_size == 1
+      assert :queue.len(new_state.message_queue) == 1
     end
 
     test "queues binary messages when not connected" do

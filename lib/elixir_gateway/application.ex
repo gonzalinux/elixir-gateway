@@ -14,6 +14,8 @@ defmodule ElixirGateway.Application do
       {Phoenix.PubSub, name: ElixirGateway.PubSub},
       # Start Finch for HTTP client
       {Finch, name: ElixirGateway.Finch},
+      # Start WebSocket connection pool
+      ElixirGatewayWeb.WebSocketConnectionPool,
       # Start to serve requests, typically the last entry
       ElixirGatewayWeb.Endpoint
     ]
