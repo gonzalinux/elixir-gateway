@@ -8,12 +8,14 @@ defmodule ElixirGateway.SiteEncrypt do
   # Private helper functions
   def get_domains do
     case System.get_env("LETSENCRYPT_DOMAINS") do
-      nil -> 
+      nil ->
         case Mix.env() do
-          :test -> ["localhost"]  # Provide dummy domain for tests
+          # Provide dummy domain for tests
+          :test -> ["localhost"]
           _ -> []
         end
-      domains_string -> 
+
+      domains_string ->
         domains_string
         |> String.split(",")
         |> Enum.map(&String.trim/1)
@@ -23,12 +25,15 @@ defmodule ElixirGateway.SiteEncrypt do
 
   def get_email do
     case System.get_env("LETSENCRYPT_EMAIL") do
-      nil -> 
+      nil ->
         case Mix.env() do
-          :test -> "test@example.com"  # Provide dummy email for tests
+          # Provide dummy email for tests
+          :test -> "test@example.com"
           _ -> nil
         end
-      email -> email
+
+      email ->
+        email
     end
   end
 

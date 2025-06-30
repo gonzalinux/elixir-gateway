@@ -10,15 +10,24 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlug do
   def call(conn, _opts) do
     remote_ip = conn.remote_ip
     IO.inspect(remote_ip, label: "Metrics endpoint access from IP")
-    
+
     case is_private_network?(remote_ip) do
       true ->
         conn
 
       false ->
+        ip_string =
+          case :inet.ntoa(remote_ip) do
+            {:error, _} -> inspect(remote_ip)
+            ip_str -> to_string(ip_str)
+          end
+
         conn
         |> put_resp_content_type("text/plain")
-        |> send_resp(403, "Forbidden: Metrics endpoint restricted to private networks. Your IP: #{:inet.ntoa(remote_ip)}")
+        |> send_resp(
+          403,
+          "Forbidden: Metrics endpoint restricted to private networks. Your IP: #{ip_string}"
+        )
         |> halt()
     end
   end
@@ -48,7 +57,6 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlug do
       {0xFE80, _, _, _, _, _, _, _} -> true
       # Docker default bridge network (172.17.0.0/16)
       {172, 17, _, _} -> true
-      
       _ -> false
     end
   end

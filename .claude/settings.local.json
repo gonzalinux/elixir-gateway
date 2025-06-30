@@ -7,7 +7,8 @@
       "Bash(mix test:*)",
       "Bash(iex:*)",
       "Bash(mix compile)",
-      "Bash(mix run:*)"
+      "Bash(mix run:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }

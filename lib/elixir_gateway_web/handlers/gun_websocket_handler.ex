@@ -11,22 +11,23 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
   def init(state) do
     target_url = state.target_url
     headers = state.headers
-    
+
     Logger.info("Gun WebSocket handler initializing connection to: #{target_url}")
-    
+
     case establish_gun_connection(target_url, headers) do
       {:ok, gun_pid, stream_ref} ->
-        new_state = Map.merge(state, %{
-          gun_pid: gun_pid,
-          gun_stream_ref: stream_ref,
-          upgrade_pending: true
-        })
-        
+        new_state =
+          Map.merge(state, %{
+            gun_pid: gun_pid,
+            gun_stream_ref: stream_ref,
+            upgrade_pending: true
+          })
+
         # Set a timeout for the upgrade
         Process.send_after(self(), :upgrade_timeout, 10000)
-        
+
         {:ok, new_state}
-      
+
       {:error, reason} ->
         Logger.error("Failed to establish Gun connection: #{inspect(reason)}")
         {:stop, :normal, state}
@@ -43,7 +44,7 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
         nil ->
           Logger.warning("No Gun WebSocket stream available")
           {:ok, state}
-        
+
         stream_ref ->
           :gun.ws_send(state.gun_pid, stream_ref, {:text, text})
           {:ok, state}
@@ -61,7 +62,7 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
         nil ->
           Logger.warning("No Gun WebSocket stream available")
           {:ok, state}
-        
+
         stream_ref ->
           :gun.ws_send(state.gun_pid, stream_ref, {:binary, binary})
           {:ok, state}
@@ -72,8 +73,9 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
   @impl WebSock
   def handle_in({payload, [opcode: :ping]}, state) do
     case state.gun_stream_ref do
-      nil -> 
+      nil ->
         {:reply, :ok, {:pong, payload}, state}
+
       stream_ref ->
         :gun.ws_send(state.gun_pid, stream_ref, {:ping, payload})
         {:ok, state}
@@ -89,25 +91,25 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
   @impl WebSock
   def handle_info({:gun_upgrade, _gun_pid, stream_ref, [<<"websocket">>], _headers}, state) do
     Logger.info("Gun WebSocket upgrade successful")
-    new_state = %{state | 
-      gun_stream_ref: stream_ref, 
-      upgrade_pending: false
-    }
+    new_state = %{state | gun_stream_ref: stream_ref, upgrade_pending: false}
     {:ok, new_state}
   end
 
   @impl WebSock
   def handle_info({:gun_response, gun_pid, stream_ref, :nofin, status, headers}, state) do
-    Logger.error("Gun WebSocket upgrade failed with status #{status}, headers: #{inspect(headers)}")
-    
+    Logger.error(
+      "Gun WebSocket upgrade failed with status #{status}, headers: #{inspect(headers)}"
+    )
+
     # Try to read the response body to get more details about the error
     case :gun.await_body(gun_pid, stream_ref, 5000) do
       {:ok, body} ->
         Logger.error("Response body: #{body}")
+
       {:error, reason} ->
         Logger.error("Failed to read response body: #{inspect(reason)}")
     end
-    
+
     {:stop, :normal, state}
   end
 
@@ -168,11 +170,11 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
   @impl WebSock
   def terminate(reason, state) do
     Logger.info("Gun WebSocket handler terminated: #{inspect(reason)}")
-    
+
     if state[:gun_pid] do
       :gun.close(state.gun_pid)
     end
-    
+
     :ok
   end
 
@@ -181,52 +183,54 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
   defp establish_gun_connection(target_url, headers) do
     # Parse the WebSocket URL
     uri = URI.parse(target_url)
-    
+
     # Convert ws:// to http:// for Gun connection
-    scheme = case uri.scheme do
-      "ws" -> :http
-      "wss" -> :https
-      other -> String.to_atom(other)
-    end
-    
-    port = uri.port || (if scheme == :https, do: 443, else: 80)
-    
+    scheme =
+      case uri.scheme do
+        "ws" -> :http
+        "wss" -> :https
+        other -> String.to_atom(other)
+      end
+
+    port = uri.port || if scheme == :https, do: 443, else: 80
+
     # Gun connection options
     gun_opts = %{
       retry: 0,
       http_opts: %{keepalive: :infinity},
       protocols: [:http]
     }
-    
+
     Logger.info("Establishing Gun connection to #{uri.host}:#{port}")
-    
+
     case :gun.open(String.to_charlist(uri.host), port, gun_opts) do
       {:ok, gun_pid} ->
         case :gun.await_up(gun_pid, 10000) do
           {:ok, _protocol} ->
             # Prepare WebSocket upgrade path
-            path_with_query = if uri.query do
-              "#{uri.path}?#{uri.query}"
-            else
-              uri.path || "/"
-            end
-            
+            path_with_query =
+              if uri.query do
+                "#{uri.path}?#{uri.query}"
+              else
+                uri.path || "/"
+              end
+
             # Prepare headers for Gun
             gun_headers = prepare_gun_headers(headers)
-            
+
             Logger.info("Sending WebSocket upgrade request to #{path_with_query}")
-            
+
             # Send WebSocket upgrade request
             stream_ref = :gun.ws_upgrade(gun_pid, path_with_query, gun_headers)
-            
+
             {:ok, gun_pid, stream_ref}
-          
+
           {:error, reason} ->
             Logger.error("Gun connection failed to come up: #{inspect(reason)}")
             :gun.close(gun_pid)
             {:error, reason}
         end
-      
+
       {:error, reason} ->
         Logger.error("Failed to open Gun connection: #{inspect(reason)}")
         {:error, reason}
@@ -236,8 +240,8 @@ defmodule ElixirGatewayWeb.GunWebSocketHandler do
   defp prepare_gun_headers(headers) do
     # Convert headers to the format expected by Gun (charlist keys and values)
     headers
-    |> Enum.map(fn {key, value} -> 
-      {String.to_charlist(key), String.to_charlist(value)} 
+    |> Enum.map(fn {key, value} ->
+      {String.to_charlist(key), String.to_charlist(value)}
     end)
   end
 end

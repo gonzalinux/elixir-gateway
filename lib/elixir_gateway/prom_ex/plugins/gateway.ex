@@ -2,7 +2,7 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
   @moduledoc """
   Custom PromEx plugin for gateway-specific metrics.
   """
-  
+
   use PromEx.Plugin
 
   @impl true
@@ -12,18 +12,18 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
     [
       # Active connections metric
       gateway_connections_total(poll_rate),
-      
+
       # Rate limiting metrics
       rate_limit_metrics(poll_rate)
     ]
   end
 
-  @impl true 
+  @impl true
   def event_metrics(_opts) do
     [
       # Request metrics
       gateway_request_metrics(),
-      
+
       # Response time metrics
       gateway_response_time_metrics()
     ]
@@ -72,7 +72,6 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           description: "Total number of requests processed",
           tags: [:method, :status, :target_service]
         ),
-        
         distribution(
           [:elixirgateway, :request, :duration, :milliseconds],
           event_name: [:elixirgateway, :request, :complete],
@@ -113,6 +112,8 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
   def execute_rate_limits do
     # This would normally query rate limit violations from Hammer
     # For now, return static values
-    :telemetry.execute([:elixirgateway, :rate_limit, :violations], %{count: 0}, %{user_type: "anonymous"})
+    :telemetry.execute([:elixirgateway, :rate_limit, :violations], %{count: 0}, %{
+      user_type: "anonymous"
+    })
   end
 end

@@ -2,7 +2,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
   @moduledoc """
   Plug that determines the target service based on the incoming domain.
   """
-  
+
   import Plug.Conn
   require Logger
 
@@ -11,15 +11,16 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
   def call(conn, _opts) do
     host = get_host(conn)
     services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
-    
+
     case Map.get(services, host) do
       nil ->
         Logger.warning("No service configured for host: #{host}")
+
         conn
         |> put_resp_content_type("application/json")
         |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
         |> halt()
-      
+
       target_url ->
         conn
         |> assign(:target_url, target_url)
@@ -29,7 +30,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
 
   defp get_host(conn) do
     if conn.host do
-    conn.host
+      conn.host
     else
       case get_req_header(conn, "host") do
         [host | _] ->
@@ -39,9 +40,8 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
           |> List.first()
 
         [] ->
-            "default"
+          "default"
       end
     end
-
   end
 end

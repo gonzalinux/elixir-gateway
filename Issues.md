@@ -12,17 +12,20 @@ Based on analysis of the Elixir-based API Gateway project, here are the most lik
 - **Location:** `config/dev.exs:15`
 
 ### 2. Missing Test Coverage
-**Severity:** High
-- Only 2 test files exist for a production gateway 
-- Users will request comprehensive test suites for rate limiting, domain routing, SSL handling
+**Severity:** ~~High~~ **RESOLVED**
+- ~~Only 2 test files exist for a production gateway~~
+- ~~Users will request comprehensive test suites for rate limiting, domain routing, SSL handling~~
+- **Status:** Comprehensive test coverage has been implemented
 - **Location:** `test/` directory
 
 ### 3. Rate Limiting Implementation Flaws
-**Severity:** High
-- IP-based fallback creates security bypass opportunities
-- No distributed rate limiting for multi-instance deployments
-- Authorization header hashing method vulnerable to collision attacks
-- **Location:** `lib/elixirgateway_web/plugs/rate_limiter.ex:35-54`
+**Severity:** ~~High~~ **RESOLVED**
+- ~~IP-based fallback creates security bypass opportunities~~
+- ~~No distributed rate limiting for multi-instance deployments~~
+- ~~Authorization header hashing method vulnerable to collision attacks~~
+- **Status:** Implemented dual-tier rate limiting with separate user (100/min) and IP (500/min) limits
+- **Enhancement:** Higher IP limit prevents bypass while maintaining user-level controls
+- **Location:** `lib/elixir_gateway_web/plugs/rate_limiter.ex`
 
 ### 4. WebSocket Connection Stability
 **Severity:** High
