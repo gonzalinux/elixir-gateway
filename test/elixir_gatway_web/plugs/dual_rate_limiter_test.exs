@@ -10,8 +10,10 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
 
     Application.put_env(:elixirgateway, :gateway,
       rate_limit: [
-        user_requests_per_minute: 5,    # Low for easier testing
-        ip_requests_per_minute: 10,     # Higher than user limit
+        # Low for easier testing
+        user_requests_per_minute: 5,
+        # Higher than user limit
+        ip_requests_per_minute: 10,
         cleanup_interval: :timer.minutes(1)
       ]
     )
@@ -32,8 +34,8 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
       user_id = "user_#{System.unique_integer([:positive])}"
       base = System.unique_integer([:positive])
       unique_ip = {10, 0, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
-      
-      conn = 
+
+      conn =
         conn
         |> Map.put(:peer_data, %{address: unique_ip})
         |> put_req_header("x-user-id", user_id)
@@ -50,7 +52,7 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
       user_id = "user_limit_test_#{System.unique_integer([:positive])}"
       base = System.unique_integer([:positive])
       unique_ip = {10, 1, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
-      
+
       conn = Map.put(conn, :peer_data, %{address: unique_ip})
 
       # Make 5 requests (user limit)
@@ -75,7 +77,7 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
     test "blocks when IP limit exceeded but user limit not exceeded", %{conn: conn} do
       base = System.unique_integer([:positive])
       unique_ip = {10, 2, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
-      
+
       conn = Map.put(conn, :peer_data, %{address: unique_ip})
 
       # Make 10 requests from same IP with different users
@@ -100,12 +102,13 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
     test "different IPs can exceed combined user requests", %{conn: conn} do
       user_id = "shared_user_#{System.unique_integer([:positive])}"
       base = System.unique_integer([:positive])
-      
+
       ip1 = {10, 3, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
       ip2 = {10, 3, rem(base + 100, 254) + 1, rem(div(base + 100, 256), 254) + 1}
 
       # User makes 5 requests from IP1 (hits user limit)
       conn1 = Map.put(conn, :peer_data, %{address: ip1})
+
       Enum.each(1..5, fn _ ->
         conn1
         |> put_req_header("x-user-id", user_id)
@@ -113,7 +116,7 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
       end)
 
       # Same user tries from IP2 - should still be blocked (user limit exceeded)
-      conn2 = 
+      conn2 =
         conn
         |> Map.put(:peer_data, %{address: ip2})
         |> put_req_header("x-user-id", user_id)
@@ -128,13 +131,13 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
     test "fallback to IP-only rate limiting when no user headers", %{conn: conn} do
       base = System.unique_integer([:positive])
       unique_ip = {10, 4, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
-      
+
       conn = Map.put(conn, :peer_data, %{address: unique_ip})
 
       # Without user headers, should use IP for both user and IP buckets
       # Since user_id falls back to IP, both buckets will be the same
       # So effectively it's limited by the more restrictive limit (user: 5)
-      
+
       # Make 5 requests (user limit when using IP as user_id)
       Enum.each(1..5, fn _ ->
         RateLimiter.call(conn, [])
@@ -154,12 +157,13 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
     test "user and IP buckets are tracked independently", %{conn: conn} do
       user_id = "independent_user_#{System.unique_integer([:positive])}"
       base = System.unique_integer([:positive])
-      
+
       ip1 = {10, 5, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
       ip2 = {10, 5, rem(base + 50, 254) + 1, rem(div(base + 50, 256), 254) + 1}
 
       # User makes 3 requests from IP1
       conn1 = Map.put(conn, :peer_data, %{address: ip1})
+
       Enum.each(1..3, fn _ ->
         conn1
         |> put_req_header("x-user-id", user_id)
@@ -186,7 +190,7 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
       user_id = "header_test_#{System.unique_integer([:positive])}"
       base = System.unique_integer([:positive])
       unique_ip = {10, 6, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
-      
+
       conn =
         conn
         |> Map.put(:peer_data, %{address: unique_ip})
@@ -194,7 +198,7 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
         |> RateLimiter.call([])
 
       refute conn.halted
-      
+
       # Check all expected headers are present
       assert get_resp_header(conn, "x-ratelimit-user-limit") == ["5"]
       assert get_resp_header(conn, "x-ratelimit-user-remaining") == ["4"]

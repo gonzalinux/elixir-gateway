@@ -8,12 +8,12 @@ config :elixirgateway, ElixirGatewayWeb.Endpoint,
   # Enable HTTPS with SiteEncrypt for automatic SSL certificates
   https: [
     port: 4001,
-         ip: {0, 0, 0, 0},
+    ip: {0, 0, 0, 0},
     cipher_suite: :strong,
     # SiteEncrypt will automatically provide these
     keyfile: {SiteEncrypt, {:pem_encoder, :key}},
-    certfile: {SiteEncrypt, {:pem_encoder, :cert}},
-#    cacertfile: {SiteEncrypt, {:pem_encoder, :chain}}
+    certfile: {SiteEncrypt, {:pem_encoder, :cert}}
+    #    cacertfile: {SiteEncrypt, {:pem_encoder, :chain}}
   ],
   # HTTP listener for ACME challenges and optional redirect
   http: [ip: {0, 0, 0, 0}, port: 4000],

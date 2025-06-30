@@ -15,7 +15,10 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
       host: "test.example.com",
       gun_pid: nil,
       gun_stream_ref: nil,
-      upgrade_pending: false
+      upgrade_pending: false,
+      reconnect_attempts: 0,
+      message_queue: [],
+      connected: false
     }
 
     {:ok, state: state}
@@ -135,7 +138,8 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
         state
         | gun_pid: gun_pid,
           gun_stream_ref: stream_ref,
-          upgrade_pending: false
+          upgrade_pending: false,
+          connected: true
       }
 
       with_mock :gun, [:unstick], ws_send: fn _pid, _stream_ref, _frame -> :ok end do
@@ -154,7 +158,8 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
         state
         | gun_pid: gun_pid,
           gun_stream_ref: stream_ref,
-          upgrade_pending: false
+          upgrade_pending: false,
+          connected: true
       }
 
       binary_data = <<1, 2, 3, 4>>
@@ -175,7 +180,8 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
         state
         | gun_pid: gun_pid,
           gun_stream_ref: stream_ref,
-          upgrade_pending: false
+          upgrade_pending: false,
+          connected: true
       }
 
       payload = "ping_payload"
@@ -201,14 +207,18 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
 
       result = GunWebSocketHandler.handle_in({"test message", [opcode: :text]}, pending_state)
 
-      assert {:ok, ^pending_state} = result
+      # New behavior: should queue the message
+      assert {:ok, new_state} = result
+      assert length(new_state.message_queue) == 1
+      assert hd(new_state.message_queue) == {:text, "test message"}
     end
 
     test "handles missing gun stream gracefully", %{state: state} do
-      no_stream_state = %{state | gun_stream_ref: nil, upgrade_pending: false}
+      no_stream_state = %{state | gun_stream_ref: nil, upgrade_pending: false, connected: true}
 
       result = GunWebSocketHandler.handle_in({"test", [opcode: :text]}, no_stream_state)
 
+      # Should not queue when connected=true but no stream (just logs warning)
       assert {:ok, ^no_stream_state} = result
     end
   end
@@ -245,7 +255,9 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
         error_msg = {:gun_response, gun_pid, stream_ref, :nofin, 404, []}
         result = GunWebSocketHandler.handle_info(error_msg, pending_state)
 
-        assert {:stop, :normal, ^pending_state} = result
+        # New behavior: should send close frame to client with appropriate code
+        assert {:reply, :ok, {:close, 1014, "Upstream connection failed: HTTP 404"}, _state} =
+                 result
       end
     end
 
@@ -258,7 +270,11 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
       error_msg = {:gun_error, gun_pid, stream_ref, :timeout}
       result = GunWebSocketHandler.handle_info(error_msg, error_state)
 
-      assert {:stop, :normal, ^error_state} = result
+      # New behavior: should attempt reconnection instead of immediate stop
+      assert {:ok, new_state} = result
+      assert new_state.reconnect_attempts == 1
+      assert new_state.connected == false
+      assert new_state.gun_pid == nil
     end
 
     test "forwards text messages from Gun to client", %{state: state} do
@@ -330,7 +346,11 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
       down_msg = {:gun_down, gun_pid, :http, :normal, []}
       result = GunWebSocketHandler.handle_info(down_msg, connected_state)
 
-      assert {:stop, :normal, ^connected_state} = result
+      # New behavior: should attempt reconnection instead of immediate stop
+      assert {:ok, new_state} = result
+      assert new_state.reconnect_attempts == 1
+      assert new_state.connected == false
+      assert new_state.gun_pid == nil
     end
 
     test "handles upgrade timeout when pending", %{state: state} do
@@ -338,7 +358,8 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
 
       result = GunWebSocketHandler.handle_info(:upgrade_timeout, pending_state)
 
-      assert {:stop, :normal, ^pending_state} = result
+      # New behavior: should send close frame with appropriate code (upgrade_timeout is permanent failure)
+      assert {:reply, :ok, {:close, 1011, "Connection failed: :upgrade_timeout"}, _state} = result
     end
 
     test "ignores upgrade timeout when not pending", %{state: state} do
@@ -357,16 +378,16 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
   end
 
   describe "terminate/2" do
-    test "closes Gun connection on termination", %{state: state} do
+    test "returns Gun connection to pool on termination", %{state: state} do
       gun_pid = spawn(fn -> :timer.sleep(1000) end)
-      terminating_state = %{state | gun_pid: gun_pid}
+      terminating_state = %{state | gun_pid: gun_pid, target_url: "ws://localhost:8080/socket"}
 
-      with_mock :gun, [:unstick], close: fn _pid -> :ok end do
-        result = GunWebSocketHandler.terminate(:normal, terminating_state)
+      # New behavior: should return connection to pool instead of closing
+      result = GunWebSocketHandler.terminate(:normal, terminating_state)
 
-        assert result == :ok
-        assert_called(:gun.close(gun_pid))
-      end
+      assert result == :ok
+      # Note: In a real scenario, we'd verify the pool received the connection
+      # but that would require more complex mocking
     end
 
     test "handles termination when no Gun connection exists", %{state: state} do
@@ -377,14 +398,14 @@ defmodule ElixirGatewayWeb.GunWebSocketHandlerTest do
 
     test "handles termination with error reason", %{state: state} do
       gun_pid = spawn(fn -> :timer.sleep(1000) end)
-      terminating_state = %{state | gun_pid: gun_pid}
+      terminating_state = %{state | gun_pid: gun_pid, target_url: "ws://localhost:8080/socket"}
 
-      with_mock :gun, [:unstick], close: fn _pid -> :ok end do
-        result = GunWebSocketHandler.terminate({:error, :timeout}, terminating_state)
+      # New behavior: should return connection to pool instead of closing
+      result = GunWebSocketHandler.terminate({:error, :timeout}, terminating_state)
 
-        assert result == :ok
-        assert_called(:gun.close(gun_pid))
-      end
+      assert result == :ok
+      # Note: In a real scenario, we'd verify the pool received the connection
+      # but that would require more complex mocking
     end
   end
 

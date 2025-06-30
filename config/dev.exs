@@ -17,10 +17,10 @@ config :elixirgateway, ElixirGatewayWeb.Endpoint,
 
 # Example gateway services configuration for development
 config :elixirgateway, :gateway,
-       services: %{
-         "default" => "https://elixir-gatway.free.beeceptor.com",
-         "localhost" => "https://elixir-gatway.free.beeceptor.com"
-       },
+  services: %{
+    "default" => "http://192.168.2.151:4000",
+    "localhost" => "http://192.168.2.151:4000"
+  },
   rate_limit: [
     requests_per_minute: 100,
     cleanup_interval: :timer.minutes(1)
@@ -61,4 +61,3 @@ config :phoenix, :stacktrace_depth, 20
 
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
-

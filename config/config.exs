@@ -14,11 +14,10 @@ config :elixirgateway,
 # Modify it with your proxied services
 config :elixirgateway, :gateway,
   services: %{
-  # default is used when no host comes in the headers
+    # default is used when no host comes in the headers
     "default" => "http://localhost:8000",
-    "yoursite.com" => "http://192.168.0.178:9022",
+    "yoursite.com" => "http://192.168.0.178:9022"
   },
-
   rate_limit: [
     user_requests_per_minute: 100,
     ip_requests_per_minute: 500,
@@ -54,6 +53,38 @@ config :elixirgateway, :finch,
 # Configure Hammer for rate limiting
 config :hammer,
   backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 2, cleanup_interval_ms: 60_000 * 10]}
+
+# Configure WebSocket settings
+config :elixirgateway, :websocket,
+  # WebSocket upgrade timeout (30 seconds default, configurable for slow networks)
+  upgrade_timeout: 30_000,
+  # Connection pool settings per target host
+  connection_pool: [
+    # Max connections per target host
+    size: 10,
+    # 5 minutes idle timeout
+    max_idle_time: 300_000,
+    # Cleanup every minute
+    cleanup_interval: 60_000
+  ],
+  # Reconnection settings
+  reconnect: [
+    # Maximum reconnection attempts
+    max_attempts: 3,
+    # Initial backoff in ms
+    initial_backoff: 1000,
+    # Maximum backoff in ms
+    max_backoff: 30_000,
+    # Exponential backoff multiplier
+    backoff_multiplier: 2
+  ],
+  # Message queue settings during reconnection
+  message_queue: [
+    # Maximum queued messages during reconnection
+    max_size: 100,
+    # How long to queue messages before giving up
+    timeout: 30_000
+  ]
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
