@@ -5,3 +5,5 @@
 /_build
 /priv/certs
 /priv/site_encrypt
+.claude
+/elixir_ls
