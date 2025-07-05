@@ -1,0 +1,41 @@
+# Ignore development and build artifacts
+_build/
+deps/
+.elixir_ls/
+.vscode/
+.idea/
+
+# Ignore test files
+test/
+cover/
+
+# Ignore development configuration
+.env
+.env.local
+
+# Ignore Git
+.git/
+.gitignore
+
+# Ignore documentation
+docs/
+*.md
+!README.md
+
+# Ignore temporary files
+tmp/
+*.tmp
+*.log
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore editor files
+*.swp
+*.swo
+*~
+
+# Ignore release artifacts (they will be built in container)
+priv/static/assets/
+priv/static/cache_manifest.json

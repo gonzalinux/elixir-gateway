@@ -9,7 +9,6 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlug do
 
   def call(conn, _opts) do
     remote_ip = conn.remote_ip
-    IO.inspect(remote_ip, label: "Metrics endpoint access from IP")
 
     case is_private_network?(remote_ip) do
       true ->

@@ -12,6 +12,13 @@ defmodule ElixirGatewayWeb.Router do
     plug(ElixirGatewayWeb.Plugs.MetricsAuthPlug)
   end
 
+  # Health check endpoints (must come before rate limiting)
+  scope "/health", ElixirGatewayWeb do
+    get("/", HealthController, :check)
+    get("/ready", HealthController, :ready)
+    get("/live", HealthController, :live)
+  end
+
   # ACME challenge endpoint (must come first for Let's Encrypt)
   scope "/.well-known" do
     forward("/acme-challenge", SiteEncrypt.AcmeChallenge, ElixirGateway.SiteEncrypt)

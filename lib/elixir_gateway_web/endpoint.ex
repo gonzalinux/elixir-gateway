@@ -7,7 +7,7 @@ defmodule ElixirGatewayWeb.Endpoint do
       # Note that native client is very immature. If you want a more stable behaviour, you can
       # provide `:certbot` instead. Note that in this case certbot needs to be installed on the
       # host machine.
-      client: :certbot,
+      client: :native,
       domains: ElixirGateway.SiteEncrypt.get_domains(),
       emails: [ElixirGateway.SiteEncrypt.get_email()],
 
@@ -21,7 +21,7 @@ defmodule ElixirGatewayWeb.Endpoint do
 
       # set OS env var CERT_MODE to "staging" or "production" on staging/production hosts
       directory_url:
-        case Mix.env() || :dev do
+        case Application.get_env(:elixirgateway, :env) do
           :dev -> {:internal, port: 4002}
           :test -> {:internal, port: 4002}
           :stage -> "https://acme-staging-v02.api.letsencrypt.org/directory"

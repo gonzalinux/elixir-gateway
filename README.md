@@ -33,8 +33,6 @@ A high-performance API Gateway built with Phoenix that provides domain-based rou
    make run
    ```
 
-For production SSL, install certbot: `make install-certbot`
-
 ## Documentation
 
 - [Setup Guide](docs/SETUP.md) - Complete configuration and deployment guide
