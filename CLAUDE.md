@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-ExGateway is a high-performance API Gateway built with Phoenix that serves as a reverse proxy with domain-based routing.
+ElixirGateway is a high-performance API Gateway built with Phoenix that serves as a reverse proxy with domain-based routing.
 
 ### Request Processing Pipeline
 ```

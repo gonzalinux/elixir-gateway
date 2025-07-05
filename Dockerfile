@@ -1,4 +1,4 @@
-# ExGateway - Production Dockerfile
+# ElixirGateway - Production Dockerfile
 # Multi-stage build for creating a minimal production image
 
 # Build stage

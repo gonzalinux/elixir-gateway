@@ -1,4 +1,4 @@
-# ExGateway
+# ElixirGateway
 [![Elixir CI](https://github.com/gonzalinux/elixir-gateway/actions/workflows/elixir.yml/badge.svg)](https://github.com/gonzalinux/elixir-gateway/actions/workflows/elixir.yml)
 
 
