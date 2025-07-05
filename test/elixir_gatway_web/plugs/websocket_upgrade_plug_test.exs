@@ -47,7 +47,10 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlugTest do
         conn = WebSocketUpgradePlug.call(conn, [])
 
         assert conn.halted
-        assert_called(WebSockAdapter.upgrade(:_, ElixirGatewayWeb.GunWebSocketHandler, :_, :_))
+
+        assert_called(
+          WebSockAdapter.upgrade(:_, ElixirGatewayWeb.EnhancedGunWebSocketHandler, :_, :_)
+        )
       end
     end
 
@@ -115,7 +118,7 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlugTest do
 
       with_mock WebSockAdapter, [:passthrough],
         upgrade: fn conn, handler, state, _opts ->
-          assert handler == ElixirGatewayWeb.GunWebSocketHandler
+          assert handler == ElixirGatewayWeb.EnhancedGunWebSocketHandler
           assert state.target_url == "ws://backend.local:8080/socket?token=abc123"
           assert state.host == "ws.example.com"
           assert state.path == "/socket?token=abc123"

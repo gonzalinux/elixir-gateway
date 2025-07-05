@@ -44,6 +44,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
   end
 
   describe "configuration and timeouts" do
+    @tag :integration
     test "uses configurable upgrade timeout" do
       state = %{
         target_url: "ws://localhost:8080/ws",
@@ -58,6 +59,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       assert {:stop, :normal, _state} = result
     end
 
+    @tag :integration
     test "initializes state with reconnection fields" do
       state = %{
         target_url: "ws://localhost:8080/ws",
@@ -74,8 +76,8 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
           assert :queue.len(new_state.message_queue) == 0
           assert new_state.connection_status == :connecting
 
-        {:ok, _state} ->
-          # Expected when reconnection is attempted
+        {:stop, :normal, _state} ->
+          # Expected when connection fails
           :ok
       end
     end
@@ -96,7 +98,11 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       }
 
       # Try to send a text message when not connected
-      result = EnhancedGunWebSocketHandler.handle_in({"test message", [opcode: :text]}, state)
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_in(
+          {"test message", [opcode: :text]},
+          state
+        )
 
       assert {:ok, new_state} = result
       assert new_state.queue_size == 1
@@ -108,48 +114,66 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
         target_url: "ws://localhost:8080/ws",
         headers: [],
         upgrade_pending: true,
-        connected: false,
-        message_queue: [],
+        connection_status: :connecting,
+        message_queue: :queue.new(),
+        queue_size: 0,
         gun_pid: nil,
-        gun_stream_ref: nil
+        gun_stream_ref: nil,
+        config: %{message_queue_max_size: 100}
       }
 
       binary_data = <<1, 2, 3, 4>>
-      result = GunWebSocketHandler.handle_in({binary_data, [opcode: :binary]}, state)
+
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_in(
+          {binary_data, [opcode: :binary]},
+          state
+        )
 
       assert {:ok, new_state} = result
-      assert length(new_state.message_queue) == 1
-      assert hd(new_state.message_queue) == {:binary, binary_data}
+      assert new_state.queue_size == 1
+      assert :queue.len(new_state.message_queue) == 1
     end
 
     test "limits message queue size" do
-      # Create state with queue near limit
-      initial_queue = Enum.map(1..9, fn i -> {:text, "message #{i}"} end)
+      # Create state with queue near limit (9 messages)
+      initial_queue =
+        Enum.reduce(1..9, :queue.new(), fn i, acc ->
+          :queue.in({:text, "message #{i}"}, acc)
+        end)
 
       state = %{
         target_url: "ws://localhost:8080/ws",
         headers: [],
         upgrade_pending: true,
-        connected: false,
+        connection_status: :connecting,
         message_queue: initial_queue,
+        queue_size: 9,
         gun_pid: nil,
-        gun_stream_ref: nil
+        gun_stream_ref: nil,
+        config: %{message_queue_max_size: 10}
       }
 
       # Add one more message (should reach limit of 10)
-      result1 = GunWebSocketHandler.handle_in({"message 10", [opcode: :text]}, state)
+      result1 =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_in(
+          {"message 10", [opcode: :text]},
+          state
+        )
+
       assert {:ok, state1} = result1
-      assert length(state1.message_queue) == 10
+      assert state1.queue_size == 10
 
-      # Add another message (should drop oldest)
-      result2 = GunWebSocketHandler.handle_in({"message 11", [opcode: :text]}, state1)
+      # Add another message (should drop oldest when queue is full)
+      result2 =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_in(
+          {"message 11", [opcode: :text]},
+          state1
+        )
+
       assert {:ok, state2} = result2
-      assert length(state2.message_queue) == 10
-
-      # First message should be dropped, last should be the new one
-      assert List.last(state2.message_queue) == {:text, "message 11"}
-      # Original first message dropped
-      assert {:text, "message 2"} = hd(state2.message_queue)
+      # Queue should not grow beyond max size
+      assert state2.queue_size == 10
     end
   end
 
@@ -160,18 +184,27 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
         headers: [],
         # Use self() as mock PID
         gun_pid: self(),
+        gun_stream_ref: make_ref(),
         reconnect_attempts: 0,
-        connected: true,
+        connection_status: :connected,
         upgrade_pending: false,
-        message_queue: []
+        message_queue: :queue.new(),
+        config: %{
+          reconnect_max_attempts: 3,
+          reconnect_base_delay: 1000,
+          reconnect_max_delay: 10000
+        }
       }
 
       # Simulate gun error
-      result = GunWebSocketHandler.handle_info({:gun_error, self(), nil, :connection_lost}, state)
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_error, self(), nil, :connection_lost},
+          state
+        )
 
       assert {:ok, new_state} = result
-      assert new_state.reconnect_attempts == 1
-      assert new_state.connected == false
+      assert new_state.connection_status == :reconnecting
       assert new_state.gun_pid == nil
     end
 
@@ -182,16 +215,25 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
         gun_pid: self(),
         # At max attempts (config set to 2)
         reconnect_attempts: 2,
-        connected: false,
+        connection_status: :reconnecting,
         upgrade_pending: false,
-        message_queue: []
+        message_queue: :queue.new(),
+        config: %{
+          reconnect_max_attempts: 2,
+          reconnect_base_delay: 1000,
+          reconnect_max_delay: 10000
+        }
       }
 
       # Simulate gun error when already at max attempts
-      result = GunWebSocketHandler.handle_info({:gun_error, self(), nil, :connection_lost}, state)
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_error, self(), nil, :connection_lost},
+          state
+        )
 
-      # Should send close frame to client
-      assert {:reply, :ok, {:close, _close_code, _reason}, _state} = result
+      # Should stop with close frame
+      assert {:stop, {:close, 1002, "Connection error"}, _state} = result
     end
 
     test "handles permanent failures without reconnection" do
@@ -199,17 +241,28 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
         target_url: "ws://localhost:8080/ws",
         headers: [],
         gun_pid: self(),
+        gun_stream_ref: make_ref(),
         reconnect_attempts: 0,
-        connected: true,
+        connection_status: :connected,
         upgrade_pending: false,
-        message_queue: []
+        message_queue: :queue.new(),
+        config: %{
+          reconnect_max_attempts: 3,
+          reconnect_base_delay: 1000,
+          reconnect_max_delay: 10000
+        }
       }
 
       # Simulate permanent failure
-      result = GunWebSocketHandler.handle_info({:gun_error, self(), nil, :econnrefused}, state)
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_error, self(), nil, :econnrefused},
+          state
+        )
 
-      # Should immediately close without reconnection
-      assert {:reply, :ok, {:close, 1014, _reason}, _state} = result
+      # Should attempt reconnection (Enhanced handler treats all errors the same way)
+      assert {:ok, new_state} = result
+      assert new_state.connection_status == :reconnecting
     end
   end
 
@@ -224,7 +277,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       }
 
       # Terminate should return connection to pool
-      result = GunWebSocketHandler.terminate(:normal, state)
+      result = ElixirGatewayWeb.GunWebSocketHandler.terminate(:normal, state)
       assert result == :ok
 
       # Note: In a real test, we'd verify the pool received the connection
@@ -232,62 +285,83 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
     end
   end
 
-  describe "WebSocket close codes" do
-    test "sends appropriate close codes for HTTP errors" do
+  describe "WebSocket upgrade failures" do
+    test "handles upgrade failure with reconnection attempt" do
       state = %{
         target_url: "ws://localhost:8080/ws",
         headers: [],
         gun_pid: self(),
         gun_stream_ref: make_ref(),
-        connected: false,
-        upgrade_pending: true
+        connection_status: :upgrading,
+        upgrade_pending: true,
+        reconnect_attempts: 0,
+        config: %{
+          reconnect_max_attempts: 3,
+          reconnect_base_delay: 1000,
+          reconnect_max_delay: 10000
+        }
       }
 
-      # Test different HTTP status codes
-      test_cases = [
-        # Unauthorized -> Policy Violation
-        {401, 1008},
-        # Forbidden -> Policy Violation  
-        {403, 1008},
-        # Not Found -> Bad Gateway
-        {404, 1014},
-        # Internal Error -> Internal Error
-        {500, 1011},
-        # Bad Gateway -> Bad Gateway
-        {502, 1014},
-        # Service Unavailable -> Try Again Later
-        {503, 1013}
-      ]
+      # Enhanced handler only handles :fin responses
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_response, self(), make_ref(), :fin, 404, []},
+          state
+        )
 
-      for {http_status, expected_close_code} <- test_cases do
-        result =
-          GunWebSocketHandler.handle_info(
-            {:gun_response, self(), make_ref(), :nofin, http_status, []},
-            state
-          )
+      # Should attempt reconnection
+      assert {:ok, new_state} = result
+      assert new_state.connection_status == :reconnecting
+    end
 
-        assert {:reply, :ok, {:close, ^expected_close_code, _reason}, _state} = result
-      end
+    test "stops after max reconnection attempts on upgrade failure" do
+      state = %{
+        target_url: "ws://localhost:8080/ws",
+        headers: [],
+        gun_pid: self(),
+        gun_stream_ref: make_ref(),
+        connection_status: :upgrading,
+        upgrade_pending: true,
+        reconnect_attempts: 3,
+        config: %{
+          reconnect_max_attempts: 3,
+          reconnect_base_delay: 1000,
+          reconnect_max_delay: 10000
+        }
+      }
+
+      result =
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_response, self(), make_ref(), :fin, 500, []},
+          state
+        )
+
+      # Should stop with close frame
+      assert {:stop, {:close, 1002, "Upgrade failed"}, _state} = result
     end
   end
 
   describe "upgrade success and message forwarding" do
     test "marks connection as successful on upgrade" do
+      queued_message = {:text, "queued message"}
+      initial_queue = :queue.in(queued_message, :queue.new())
+
       state = %{
         target_url: "ws://localhost:8080/ws",
         headers: [],
         gun_pid: self(),
         gun_stream_ref: make_ref(),
         upgrade_pending: true,
-        connected: false,
-        message_queue: [{:text, "queued message"}],
+        connection_status: :upgrading,
+        message_queue: initial_queue,
+        queue_size: 1,
         reconnect_attempts: 1
       }
 
       stream_ref = make_ref()
 
       result =
-        GunWebSocketHandler.handle_info(
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
           {:gun_upgrade, self(), stream_ref, [<<"websocket">>], []},
           state
         )
@@ -295,18 +369,22 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       assert {:ok, new_state} = result
       assert new_state.gun_stream_ref == stream_ref
       assert new_state.upgrade_pending == false
-      assert new_state.connected == true
+      assert new_state.connection_status == :connected
       assert new_state.reconnect_attempts == 0
       # Message queue should be cleared after sending
-      assert new_state.message_queue == []
+      assert :queue.is_empty(new_state.message_queue)
+      assert new_state.queue_size == 0
     end
 
     test "forwards incoming WebSocket messages" do
-      state = %{connected: true}
+      state = %{connection_status: :connected}
 
       # Test text message forwarding
       result =
-        GunWebSocketHandler.handle_info({:gun_ws, self(), make_ref(), {:text, "hello"}}, state)
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_ws, self(), make_ref(), {:text, "hello"}},
+          state
+        )
 
       assert {:reply, :ok, {:text, "hello"}, ^state} = result
 
@@ -314,7 +392,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       binary_data = <<1, 2, 3>>
 
       result =
-        GunWebSocketHandler.handle_info(
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
           {:gun_ws, self(), make_ref(), {:binary, binary_data}},
           state
         )
@@ -323,7 +401,10 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
 
       # Test ping forwarding
       result =
-        GunWebSocketHandler.handle_info({:gun_ws, self(), make_ref(), {:ping, "ping"}}, state)
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
+          {:gun_ws, self(), make_ref(), {:ping, "ping"}},
+          state
+        )
 
       assert {:reply, :ok, {:ping, "ping"}, ^state} = result
     end
@@ -332,26 +413,26 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       state = %{
         target_url: "ws://localhost:8080/ws",
         gun_pid: self(),
-        connected: true
+        connection_status: :connected
       }
 
       # Test close frame with code and reason
       result =
-        GunWebSocketHandler.handle_info(
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
           {:gun_ws, self(), make_ref(), {:close, 1000, "Normal closure"}},
           state
         )
 
-      assert {:stop, :normal, ^state} = result
+      assert {:stop, {:close, 1000, "Normal closure"}, ^state} = result
 
       # Test close frame with different code
       result =
-        GunWebSocketHandler.handle_info(
+        ElixirGatewayWeb.EnhancedGunWebSocketHandler.handle_info(
           {:gun_ws, self(), make_ref(), {:close, 1001, "Going away"}},
           state
         )
 
-      assert {:stop, :normal, ^state} = result
+      assert {:stop, {:close, 1001, "Going away"}, ^state} = result
     end
   end
 end

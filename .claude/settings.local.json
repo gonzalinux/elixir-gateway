@@ -9,7 +9,8 @@
       "Bash(mix compile)",
       "Bash(mix run:*)",
       "Bash(find:*)",
-      "Bash(mix format)"
+      "Bash(mix format)",
+      "Bash(rg:*)"
     ],
     "deny": []
   }

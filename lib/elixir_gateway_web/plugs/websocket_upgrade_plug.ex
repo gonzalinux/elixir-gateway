@@ -105,7 +105,8 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
       |> Enum.reduce([], fn header_name, acc ->
         case get_req_header(conn, header_name) do
           [] -> acc
-          [value | _] -> [{header_name, value} | acc]
+          [value | _] when value != "" -> [{header_name, value} | acc]
+          _ -> acc
         end
       end)
 
