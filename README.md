@@ -1,5 +1,8 @@
 # ExGateway
 [![Elixir CI](https://github.com/gonzalinux/elixir-gateway/actions/workflows/elixir.yml/badge.svg)](https://github.com/gonzalinux/elixir-gateway/actions/workflows/elixir.yml)
+
+
+
 A high-performance API Gateway built with Phoenix that provides domain-based routing, rate limiting, SSL/TLS support, WebSocket proxying, and comprehensive monitoring.
 
 ## Features
