@@ -12,7 +12,7 @@ defmodule ElixirGatewayWeb.HealthController do
       status: "healthy",
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
       version: Application.spec(:elixirgateway, :vsn) |> to_string(),
-      uptime: System.uptime() |> trunc(),
+      uptime: uptime_total,
       checks: perform_health_checks()
     }
 
