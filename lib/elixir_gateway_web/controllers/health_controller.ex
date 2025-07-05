@@ -6,6 +6,7 @@ defmodule ElixirGatewayWeb.HealthController do
   """
 
   def check(conn, _params) do
+    [uptime_total, _uptime_since_last] = :erlang.statistics(:runtime)
     # Basic health checks
     status = %{
       status: "healthy",
