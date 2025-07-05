@@ -54,10 +54,13 @@ defmodule ElixirGatewayWeb.HealthController do
     # Kubernetes liveness probe - check if app is alive
     conn
     |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{
-      status: "alive",
-      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
-    }))
+    |> send_resp(
+      200,
+      Jason.encode!(%{
+        status: "alive",
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+    )
   end
 
   defp perform_health_checks do
@@ -91,6 +94,7 @@ defmodule ElixirGatewayWeb.HealthController do
       case :ets.info(:hammer_ets_buckets) do
         :undefined ->
           %{status: "unhealthy", message: "Rate limiting ETS table not found"}
+
         _ ->
           %{status: "healthy", message: "ETS tables available"}
       end
@@ -113,6 +117,7 @@ defmodule ElixirGatewayWeb.HealthController do
               total_hosts: stats.total_hosts
             }
           }
+
         _ ->
           %{status: "degraded", message: "WebSocket pool statistics unavailable"}
       end
@@ -128,8 +133,10 @@ defmodule ElixirGatewayWeb.HealthController do
       case Hammer.check_rate("health_check", 60_000, 1) do
         {:allow, _count} ->
           %{status: "healthy", message: "Rate limiter functional"}
+
         {:deny, _count} ->
           %{status: "healthy", message: "Rate limiter functional (denied as expected)"}
+
         _ ->
           %{status: "degraded", message: "Rate limiter response unexpected"}
       end
@@ -143,10 +150,11 @@ defmodule ElixirGatewayWeb.HealthController do
     # Check if gateway configuration is valid
     try do
       config = Application.get_env(:elixirgateway, :gateway)
-      
+
       case config do
         %{services: services} when is_map(services) and map_size(services) > 0 ->
           %{status: "healthy", message: "Gateway configuration valid"}
+
         _ ->
           %{status: "unhealthy", message: "Gateway services not configured"}
       end
@@ -159,10 +167,11 @@ defmodule ElixirGatewayWeb.HealthController do
   defp check_gateway_services do
     # Check if at least one gateway service is configured
     config = Application.get_env(:elixirgateway, :gateway)
-    
+
     case config do
       %{services: services} when is_map(services) and map_size(services) > 0 ->
         true
+
       _ ->
         false
     end
@@ -174,8 +183,10 @@ defmodule ElixirGatewayWeb.HealthController do
     cond do
       Enum.any?(statuses, &(&1 == "unhealthy")) ->
         "unhealthy"
+
       Enum.any?(statuses, &(&1 == "degraded")) ->
         "degraded"
+
       true ->
         "healthy"
     end
