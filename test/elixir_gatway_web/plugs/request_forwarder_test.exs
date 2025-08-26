@@ -89,7 +89,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
         |> Map.put(:request_path, "/api/users/1")
         |> Map.put(:query_string, "")
         |> Map.put(:method, "PUT")
-        |> Map.put(:params, %{"name" => "Jane", "email" => "jane@example.com"})
+        |> Map.put(:body_params, %{"name" => "Jane", "email" => "jane@example.com"})
         |> RequestForwarder.call([])
 
       assert conn.status == 200

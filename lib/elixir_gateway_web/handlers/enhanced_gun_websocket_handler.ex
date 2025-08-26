@@ -303,14 +303,8 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
     case WebSocketConnectionPool.get_connection(target_url) do
       {:ok, gun_pid} ->
         # Use pooled connection
-        case send_websocket_upgrade(gun_pid, target_url, headers) do
-          {:ok, stream_ref} ->
-            {:ok, gun_pid, stream_ref}
-
-          {:error, reason} ->
-            WebSocketConnectionPool.remove_connection(target_url, gun_pid)
-            {:error, reason}
-        end
+        {:ok, stream_ref} = send_websocket_upgrade(gun_pid, target_url, headers)
+        {:ok, gun_pid, stream_ref}
 
       {:error, :pool_limit_reached} ->
         Logger.warning("Connection pool limit reached for #{target_url}")
