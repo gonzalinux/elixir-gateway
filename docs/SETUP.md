@@ -1,6 +1,6 @@
-# ExGateway Setup Guide
+# Elixir-Gateway Setup Guide
 
-Complete configuration and deployment instructions for ExGateway.
+Complete configuration and deployment instructions for Elixir-Gateway.
 
 ## Configuration
 
@@ -21,10 +21,10 @@ config :elixir_gateway, :gateway,
 
 ### SSL/TLS Configuration
 
-ExGateway provides flexible SSL certificate management suitable for Docker deployments and traditional servers.
+Elixir-Gateway provides flexible SSL certificate management suitable for Docker deployments and traditional servers.
 
 #### Production: Automatic SSL Management
-ExGateway automatically handles SSL certificates in production:
+Elixir-Gateway automatically handles SSL certificates in production:
 
 **Default Configuration** (Docker-friendly):
 - Self-signed certificates generated automatically for development/testing
@@ -71,7 +71,7 @@ Access monitoring interfaces:
 
 Available metrics:
 - Request counts and response times by domain
-- Rate limiting violations  
+- Rate limiting violations
 - Connection pool status
 - SSL certificate status
 - Finch HTTP client metrics
@@ -131,7 +131,7 @@ export LETSENCRYPT_EMAIL="admin@yourdomain.com"
 
 ## Health Check Endpoints
 
-ExGateway provides health check endpoints for load balancers and monitoring:
+Elixir-Gateway provides health check endpoints for load balancers and monitoring:
 
 | Endpoint | Purpose | Use Case |
 |----------|---------|----------|
@@ -160,7 +160,7 @@ ExGateway provides health check endpoints for load balancers and monitoring:
 
 ## CORS Configuration
 
-ExGateway handles CORS through the backend services it proxies to. However, you can configure CORS at the gateway level for additional control.
+Elixir-Gateway handles CORS through the backend services it proxies to. However, you can configure CORS at the gateway level for additional control.
 
 ### Backend Service CORS (Recommended)
 

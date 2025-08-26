@@ -1,8 +1,8 @@
-# WebSocket Proxy Architecture in ExGateway
+# WebSocket Proxy Architecture in Elixir-Gateway
 
 ## Overview
 
-ExGateway implements a sophisticated WebSocket proxy that enables transparent proxying of WebSocket connections to backend services while maintaining session integrity and proper connection management. The proxy supports both LiveView applications and general WebSocket services.
+Elixir-Gateway implements a sophisticated WebSocket proxy that enables transparent proxying of WebSocket connections to backend services while maintaining session integrity and proper connection management. The proxy supports both LiveView applications and general WebSocket services.
 
 ## Architecture Components
 
@@ -52,7 +52,7 @@ The actual WebSocket proxy implementation that manages the connection lifecycle 
 
 ### 1. Initial Request Detection
 ```
-Client → ExGateway → WebSocketUpgradePlug
+Client → Elixir-Gateway → WebSocketUpgradePlug
                    ↓
               [Detects WebSocket headers]
                    ↓
@@ -73,7 +73,7 @@ The proxy carefully transforms headers to maintain session validity:
 
 ### 3. Connection Establishment
 ```
-ExGateway → Gun Client → Backend Service
+Elixir-Gateway → Gun Client → Backend Service
     ↓           ↓              ↓
 [Upgrade]   [TCP Connect]  [Accept WS]
     ↓           ↓              ↓
@@ -82,14 +82,14 @@ ExGateway → Gun Client → Backend Service
 
 ### 4. Bidirectional Message Flow
 ```
-Client ←→ ExGateway Handler ←→ Gun Client ←→ Backend Service
+Client ←→ Elixir-Gateway Handler ←→ Gun Client ←→ Backend Service
         [WebSock interface]     [Gun WS]
 ```
 
 ## Message Handling
 
 ### Client to Backend
-1. Client sends WebSocket frame to ExGateway
+1. Client sends WebSocket frame to Elixir-Gateway
 2. `handle_in/2` receives the frame
 3. Frame is forwarded to Gun client via `:gun.ws_send/3`
 4. Gun client sends frame to backend service
@@ -137,7 +137,7 @@ The proxy maintains session integrity through careful header management:
 # Original origin preserved for session validation
 {"origin", original_origin || "http://#{original_host}"}
 
-# Host header points to target service  
+# Host header points to target service
 {"host", target_host_port}
 
 # Cookies forwarded unchanged
@@ -172,7 +172,7 @@ WebSocket connections pass through rate limiting but bypass HTTP-specific plugs 
 While not explicitly LiveView-specific, this proxy architecture fully supports Phoenix LiveView applications:
 
 - **Session continuity**: Maintains Phoenix sessions through cookie forwarding
-- **Origin validation**: Preserves origin headers for CSRF protection  
+- **Origin validation**: Preserves origin headers for CSRF protection
 - **Real-time updates**: Handles all LiveView WebSocket communication
 - **Error handling**: Graceful degradation when LiveView processes crash
 

@@ -142,8 +142,8 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
       # If params were parsed from form data, encode as form
       String.starts_with?(content_type, "application/x-www-form-urlencoded") and
-          conn.params != %{} ->
-        URI.encode_query(conn.params)
+          conn.body_params != %{} ->
+        URI.encode_query(conn.body_params)
 
       # For all other content types (including binary), use raw body
       true ->

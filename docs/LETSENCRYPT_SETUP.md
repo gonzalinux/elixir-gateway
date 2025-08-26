@@ -1,6 +1,6 @@
 # Let's Encrypt SSL Configuration
 
-ExGateway now supports automatic SSL certificate management using Let's Encrypt via the `site_encrypt` library.
+Elixir-Gateway now supports automatic SSL certificate management using Let's Encrypt via the `site_encrypt` library.
 
 ## 🚀 Quick Setup
 
@@ -183,7 +183,7 @@ export LETSENCRYPT_DOMAINS="api.company1.com,service.company2.com,admin.company3
 ```ini
 # /etc/systemd/system/elixir_gateway.service
 [Unit]
-Description=ExGateway API Gateway
+Description=Elixir-Gateway API Gateway
 After=network.target
 
 [Service]

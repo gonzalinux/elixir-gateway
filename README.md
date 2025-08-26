@@ -51,7 +51,7 @@ A high-performance API Gateway built with Phoenix that provides domain-based rou
 ## Architecture
 
 ```
-Internet → ExGateway → Internal Services
+Internet → Elixir-Gateway → Internal Services
     ↓
 [Rate Limit] → [Domain Router] → [Request Forwarder]
     ↓                                ↓
