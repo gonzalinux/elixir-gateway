@@ -7,3 +7,4 @@
 /priv/site_encrypt
 .claude
 /elixir_ls
+erl_crash.dump
