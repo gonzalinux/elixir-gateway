@@ -1,8 +1,6 @@
 defmodule ElixirGateway.Cluster.DDNS.NamecheapTest do
   use ExUnit.Case, async: true
 
-  alias ElixirGateway.Cluster.DDNS.Namecheap
-
   setup do
     bypass = Bypass.open()
     {:ok, bypass: bypass}
@@ -11,8 +9,8 @@ defmodule ElixirGateway.Cluster.DDNS.NamecheapTest do
   describe "update/4" do
     test "successfully updates DNS record", %{bypass: bypass} do
       Bypass.expect_once(bypass, "GET", "/update", fn conn ->
-        # Verify query parameters
-        assert conn.query_string =~ "host=@"
+        # Verify query parameters (@ is URL-encoded as %40)
+        assert conn.query_string =~ "host=%40"
         assert conn.query_string =~ "domain=example.com"
         assert conn.query_string =~ "password=test123"
         assert conn.query_string =~ "ip=1.2.3.4"
@@ -67,7 +65,8 @@ defmodule ElixirGateway.Cluster.DDNS.NamecheapTest do
     end
 
     test "handles HTTP error", %{bypass: bypass} do
-      Bypass.expect_once(bypass, "GET", "/update", fn conn ->
+      # Req will retry on 500 errors, so we need to handle multiple requests
+      Bypass.expect(bypass, "GET", "/update", fn conn ->
         Plug.Conn.resp(conn, 500, "Internal Server Error")
       end)
 
@@ -86,8 +85,8 @@ defmodule ElixirGateway.Cluster.DDNS.NamecheapTest do
     end
 
     test "handles network error" do
-      # Use invalid port to simulate network error
-      url = "http://localhost:99999/update"
+      # Use non-existent host to simulate network error
+      url = "http://invalid-host-that-does-not-exist.local:9999/update"
 
       result =
         update_with_custom_url(
@@ -182,7 +181,8 @@ defmodule ElixirGateway.Cluster.DDNS.NamecheapTest do
     end
 
     test "handles HTTP error", %{bypass: bypass} do
-      Bypass.expect_once(bypass, "GET", "/", fn conn ->
+      # Req will retry on 500 errors, so we need to handle multiple requests
+      Bypass.expect(bypass, "GET", "/", fn conn ->
         Plug.Conn.resp(conn, 500, "Error")
       end)
 

@@ -56,13 +56,13 @@ defmodule ElixirGateway.Cluster.Supervisor do
   end
 
   defp validate_config!(config) do
-    required_fields = [:secret, :node_name, :peers]
+    # Validate secret and node_name are present
+    required_fields = [:secret, :node_name]
 
     Enum.each(required_fields, fn field ->
       value = Keyword.get(config, field)
 
-      if is_nil(value) or (is_list(value) and value == []) or
-           (is_binary(value) and String.trim(value) == "") do
+      if is_nil(value) or (is_binary(value) and String.trim(value) == "") do
         raise ArgumentError, """
         Clustering is enabled but required field :#{field} is missing or empty.
 
@@ -72,10 +72,19 @@ defmodule ElixirGateway.Cluster.Supervisor do
           enabled: true,
           secret: System.get_env("CLUSTER_SECRET"),
           node_name: System.get_env("NODE_NAME"),
-          peers: ["gateway-b.example.com:9100"]
+          peers: ["gateway-b.example.com:9100"]  # Can be empty for asymmetric setup
         """
       end
     end)
+
+    # Peers must be a list (can be empty for asymmetric cloud setup)
+    peers = Keyword.get(config, :peers)
+    unless is_list(peers) do
+      raise ArgumentError, """
+      Clustering is enabled but :peers must be a list.
+      Use an empty list [] for nodes that only accept connections (e.g., cloud servers).
+      """
+    end
 
     :ok
   end

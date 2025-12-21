@@ -168,8 +168,19 @@ defmodule ElixirGateway.Cluster.Manager do
 
     # 5. TLS with Shared Secret (No Certs)
     # We use Pre-Shared Key (PSK) authentication
-    # Should be a binary
-    psk_secret = shared_secret
+    # Secret comes as hex-encoded string from env, needs to be decoded to bytes
+    psk_secret =
+      case Base.decode16(shared_secret, case: :lower) do
+        {:ok, bytes} -> bytes
+        :error ->
+          # Try mixed case
+          case Base.decode16(shared_secret, case: :mixed) do
+            {:ok, bytes} -> bytes
+            :error ->
+              Logger.error("Invalid cluster secret format - must be hex-encoded")
+              raise ArgumentError, "Cluster secret must be a valid hex string"
+          end
+      end
 
     # Lookup function required by Erlang's :ssl for PSK
     # It verifies the identity and returns the secret key
@@ -181,8 +192,17 @@ defmodule ElixirGateway.Cluster.Manager do
     psk_options = [
       {:psk_identity, "partisan_cluster"},
       {:user_lookup_fun, lookup_fun},
-      # PSK ciphersuites (required for non-cert auth)
-      {:ciphers, [:psk_with_aes_128_cbc_sha]}
+      # Support TLS 1.3 and 1.2
+      {:versions, [:"tlsv1.3", :"tlsv1.2"]},
+      # PSK ciphersuites for both TLS versions
+      {:ciphers, [
+        # TLS 1.3 PSK cipher (preferred)
+        :"TLS_AES_256_GCM_SHA384",
+        :"TLS_AES_128_GCM_SHA256",
+        # TLS 1.2 PSK fallback
+        :psk_with_aes_128_cbc_sha,
+        :psk_with_aes_256_cbc_sha
+      ]}
     ]
 
     Application.put_env(:partisan, :tls_server_options, psk_options)
@@ -249,15 +269,20 @@ defmodule ElixirGateway.Cluster.Manager do
 
   defp get_partisan_peers do
     # Get the list of cluster members
-    {:ok, members} = PartisanPeerService.members()
+    case PartisanPeerService.members() do
+      {:ok, members} ->
+        # Get our own identity to filter it out
+        myself = :partisan.node_spec()
 
-    # Get our own identity to filter it out
-    myself = :partisan.node_spec()
+        # Filter out self. Note: 'members' usually returns a list of names (atoms).
+        # 'myself' returns a full spec map. We compare the name field.
+        members
+        |> Enum.reject(fn member_name -> member_name == myself.name end)
 
-    # Filter out self. Note: 'members' usually returns a list of names (atoms).
-    # 'myself' returns a full spec map. We compare the name field.
-    members
-    |> Enum.reject(fn member_name -> member_name == myself.name end)
+      {:error, reason} ->
+        Logger.warning("Failed to get Partisan members: #{inspect(reason)}")
+        []
+    end
   end
 
   defp update_peer_health(configured_peers) do

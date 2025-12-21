@@ -51,7 +51,7 @@ defmodule ElixirGateway.Cluster.Secret do
   def load_or_generate(env \\ "CLUSTER_SECRET") do
     case System.get_env(env) do
       nil ->
-        if Mix.env() == :dev do
+        if Mix.env() in [:dev, :test] do
           secret = generate()
           IO.puts(:stderr, """
           WARNING: No #{env} found, generated temporary secret for development.

@@ -3,10 +3,14 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   Monitors peer health and triggers DDNS updates on failure.
 
   Behavior:
-  - Monitors cluster health via Cluster.Manager
-  - When all peers are down, updates DNS to point to this node
-  - When peers recover, optionally updates DNS back
-  - Includes backoff to prevent DNS flapping
+  - Monitors cluster health via Cluster.Manager every 5 seconds
+  - When all peers become unhealthy, schedules a DNS failover after a timeout
+  - If peers recover during the timeout, the failover is cancelled
+  - When peers recover after failover, optionally updates DNS back (currently disabled)
+  - Uses async scheduling to avoid blocking the GenServer during timeout
+
+  This prevents unnecessary DNS updates if a peer briefly disconnects and
+  reconnects before the timeout expires.
   """
 
   use GenServer
@@ -26,7 +30,8 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     :failover_timeout,
     :last_state,
     :failover_triggered_at,
-    :public_ip_cache
+    :public_ip_cache,
+    :pending_failover_ref
   ]
 
   ## Client API
@@ -72,7 +77,8 @@ defmodule ElixirGateway.Cluster.DNSFailover do
       failover_timeout: failover_timeout,
       last_state: :unknown,
       failover_triggered_at: nil,
-      public_ip_cache: nil
+      public_ip_cache: nil,
+      pending_failover_ref: nil
     }
 
     # Schedule first health check
@@ -94,11 +100,43 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   end
 
   @impl true
+  def handle_info(:execute_failover, state) do
+    # Re-check cluster health before executing failover
+    # (in case it recovered during the timeout period)
+    cluster_healthy = ElixirGateway.Cluster.Manager.cluster_healthy?()
+
+    if cluster_healthy do
+      Logger.info("Cluster recovered during failover timeout, cancelling DNS update")
+      {:noreply, %{state | last_state: :healthy, pending_failover_ref: nil}}
+    else
+      Logger.warning("Executing scheduled DNS failover")
+      {_result, updated_state} = perform_dns_update(state)
+      {:noreply, %{
+        updated_state |
+        last_state: :failed,
+        failover_triggered_at: System.monotonic_time(:millisecond),
+        pending_failover_ref: nil
+      }}
+    end
+  end
+
+  @impl true
   def handle_call(:trigger_failover, _from, state) do
     Logger.warning("Manual DNS failover triggered")
-    result = perform_dns_update(state)
 
-    new_state = %{state | last_state: :failed, failover_triggered_at: System.monotonic_time(:millisecond)}
+    # Cancel any pending automatic failover
+    if state.pending_failover_ref do
+      Process.cancel_timer(state.pending_failover_ref)
+    end
+
+    {result, updated_state} = perform_dns_update(state)
+
+    new_state = %{
+      updated_state |
+      last_state: :failed,
+      failover_triggered_at: System.monotonic_time(:millisecond),
+      pending_failover_ref: nil
+    }
 
     {:reply, result, new_state}
   end
@@ -108,6 +146,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     status = %{
       last_state: state.last_state,
       failover_triggered_at: state.failover_triggered_at,
+      pending_failover: state.pending_failover_ref != nil,
       domains: state.domains,
       provider: state.provider,
       cached_public_ip: state.public_ip_cache
@@ -122,18 +161,22 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     cluster_healthy = ElixirGateway.Cluster.Manager.cluster_healthy?()
 
     cond do
-      # Cluster was healthy, now unhealthy - trigger failover
+      # Cluster was healthy, now unhealthy - schedule delayed failover
       state.last_state == :healthy and not cluster_healthy ->
-        Logger.warning("Cluster became unhealthy, initiating DNS failover")
-        wait_for_failover_timeout(state.failover_timeout)
-        perform_dns_update(state)
-        %{state | last_state: :failed, failover_triggered_at: System.monotonic_time(:millisecond)}
+        Logger.warning("Cluster became unhealthy, scheduling DNS failover in #{state.failover_timeout}ms")
+        # Schedule failover asynchronously to avoid blocking the GenServer
+        ref = Process.send_after(self(), :execute_failover, state.failover_timeout)
+        %{state | last_state: :failing, pending_failover_ref: ref}
 
-      # Cluster was unhealthy, now healthy - log recovery
-      state.last_state == :failed and cluster_healthy ->
+      # Cluster was unhealthy/failing, now healthy - cancel pending failover
+      state.last_state in [:failed, :failing] and cluster_healthy ->
         Logger.info("Cluster recovered, peers are healthy again")
-        # Optionally update DNS back to primary (for now, we don't)
-        %{state | last_state: :healthy}
+        # Cancel pending failover if it exists
+        if state.pending_failover_ref do
+          Process.cancel_timer(state.pending_failover_ref)
+          Logger.info("Cancelled pending DNS failover (cluster recovered)")
+        end
+        %{state | last_state: :healthy, pending_failover_ref: nil}
 
       # First check or no state change
       state.last_state == :unknown ->
@@ -147,15 +190,14 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     end
   end
 
-  defp wait_for_failover_timeout(timeout) do
-    Logger.info("Waiting #{timeout}ms before triggering failover...")
-    Process.sleep(timeout)
-  end
-
   defp perform_dns_update(state) do
     case get_public_ip(state) do
       {:ok, ip} ->
         Logger.info("Updating DNS records to point to #{ip}")
+
+        # Update IP cache with current timestamp
+        now = System.monotonic_time(:millisecond)
+        updated_state = %{state | public_ip_cache: {ip, now}}
 
         results =
           case state.provider do
@@ -172,15 +214,15 @@ defmodule ElixirGateway.Cluster.DNSFailover do
 
         if failures == [] do
           Logger.info("All DNS updates successful")
-          {:ok, ip}
+          {{:ok, ip}, updated_state}
         else
           Logger.error("Some DNS updates failed: #{inspect(failures)}")
-          {:error, :partial_failure}
+          {{:error, :partial_failure}, updated_state}
         end
 
       {:error, reason} ->
         Logger.error("Failed to get public IP: #{inspect(reason)}")
-        {:error, reason}
+        {{:error, reason}, state}
     end
   end
 
@@ -212,15 +254,8 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   end
 
   defp fetch_public_ip do
-    case Namecheap.get_public_ip() do
-      {:ok, ip} ->
-        # Update cache
-        # Note: We're returning the result, cache update happens in caller
-        {:ok, ip}
-
-      error ->
-        error
-    end
+    # Fetch fresh public IP from external service
+    Namecheap.get_public_ip()
   end
 
   defp schedule_health_check(interval) do
