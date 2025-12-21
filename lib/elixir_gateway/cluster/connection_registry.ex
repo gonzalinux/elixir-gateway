@@ -100,20 +100,6 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
     end
   end
 
-  @doc """
-  Returns all registered connections on all nodes.
-  """
-  def list_connections do
-    if clustering_enabled?() do
-      :syn.registry(@registry_scope)
-      |> Enum.map(fn {key, {_pid, node}} ->
-        {key, node}
-      end)
-    else
-      []
-    end
-  end
-
   ## Server Callbacks
 
   @impl true

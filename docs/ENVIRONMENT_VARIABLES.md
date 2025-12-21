@@ -7,6 +7,7 @@ This document provides comprehensive documentation for all environment variables
 - [Required Variables](#required-variables)
 - [SSL/TLS Configuration](#ssltls-configuration)
 - [Application Configuration](#application-configuration)
+- [Clustering Configuration](#clustering-configuration)
 - [Network Configuration](#network-configuration)
 - [Development & Debugging](#development--debugging)
 
@@ -160,7 +161,9 @@ PORT="8080"
 **Default:** None (clustering disabled)
 **Used in:** `config/runtime.exs:39`, `lib/elixir_gateway/application.ex:13`
 
-DNS query for automatic node discovery in clustered deployments.
+DNS query for automatic node discovery in clustered deployments (Kubernetes/Swarm).
+
+**Note:** This is different from Partisan clustering (see Clustering Configuration section).
 
 ```bash
 # Kubernetes headless service
@@ -169,6 +172,182 @@ DNS_CLUSTER_QUERY="elixirgateway.default.svc.cluster.local"
 # Docker Swarm service
 DNS_CLUSTER_QUERY="elixirgateway"
 ```
+
+## Clustering Configuration
+
+ElixirGateway supports high-availability clustering using Partisan for encrypted peer-to-peer communication and automatic failover. See [CLUSTERING.md](CLUSTERING.md) for complete setup guide.
+
+### CLUSTER_ENABLED
+**Type:** Boolean ("true" or "false")
+**Required:** No
+**Default:** "false"
+**Used in:** `lib/elixir_gateway/cluster/supervisor.ex:19`
+
+Enable Partisan clustering for high availability and automatic failover.
+
+```bash
+CLUSTER_ENABLED="true"
+```
+
+### CLUSTER_SECRET
+**Type:** String (64-character hex)
+**Required:** Yes (if clustering enabled)
+**Default:** None
+**Used in:** `lib/elixir_gateway/cluster/manager.ex:59`
+
+Shared secret for encrypted communication between cluster nodes. All nodes must use the same secret.
+
+```bash
+# Generate with mix task
+mix elixir_gateway.gen.cluster_secret
+
+# Or with openssl
+openssl rand -hex 32
+
+# Example
+CLUSTER_SECRET="a1b2c3d4e5f6...64-characters-total"
+```
+
+**Security Note:** Keep this secret secure. Anyone with this secret can join your cluster.
+
+### NODE_NAME
+**Type:** String
+**Required:** Yes (if clustering enabled)
+**Default:** None
+**Used in:** `lib/elixir_gateway/cluster/manager.ex:57`
+
+Unique name for this node in the cluster. Each node must have a different name.
+
+```bash
+# Cloud node
+NODE_NAME="gateway-cloud"
+
+# Home node
+NODE_NAME="gateway-home"
+```
+
+### NODE_IP
+**Type:** String (IP address)
+**Required:** No
+**Default:** Auto-detected
+**Used in:** `lib/elixir_gateway/cluster/manager.ex:317`
+
+IP address for this node. If not set, the node will auto-detect its public IP (via ipify.org), falling back to local IP if needed.
+
+```bash
+# Explicit IP (recommended for cloud servers)
+NODE_IP="203.0.113.10"
+
+# Auto-detect (recommended for home servers with dynamic IP)
+# NODE_IP=""  # or omit entirely
+```
+
+**Node Naming:** Nodes are named using the format `name@ip` (e.g., `gateway-cloud@203.0.113.10`).
+
+### CLUSTER_PORT
+**Type:** Integer
+**Required:** No
+**Default:** 9100
+**Used in:** `lib/elixir_gateway/cluster/manager.ex:60`
+
+Port for Partisan cluster communication. Must be accessible between nodes.
+
+```bash
+CLUSTER_PORT="9100"
+```
+
+### CLUSTER_PEERS
+**Type:** String (comma-separated)
+**Required:** Yes (if clustering enabled)
+**Default:** Empty
+**Used in:** `lib/elixir_gateway/cluster/manager.ex:58`
+
+Comma-separated list of peer addresses in `host:port` format.
+
+```bash
+# Single peer
+CLUSTER_PEERS="gateway-b.example.com:9100"
+
+# Multiple peers
+CLUSTER_PEERS="gateway-b.example.com:9100,gateway-c.example.com:9100"
+
+# Empty for nodes that only accept connections (cloud server with static IP)
+CLUSTER_PEERS=""
+```
+
+**Asymmetric Setup:** For cloud + home deployments:
+- Cloud node: `CLUSTER_PEERS=""` (accepts connections only)
+- Home node: `CLUSTER_PEERS="cloud.example.com:9100"` (initiates connection)
+
+### DNS_FAILOVER_ENABLED
+**Type:** Boolean ("true" or "false")
+**Required:** No
+**Default:** "false"
+**Used in:** `lib/elixir_gateway/cluster/supervisor.ex:53`
+
+Enable automatic DNS updates when cluster peers fail. Requires clustering to be enabled.
+
+```bash
+DNS_FAILOVER_ENABLED="true"
+```
+
+### DDNS_PASS_*
+**Type:** String
+**Required:** Yes (if DNS failover enabled)
+**Default:** None
+**Used in:** Various (per domain configuration)
+
+Namecheap Dynamic DNS passwords for each domain. Replace `*` with your domain name.
+
+```bash
+# Example for example.com
+DDNS_PASS_EXAMPLE_COM="your-namecheap-ddns-password"
+
+# Example for another domain
+DDNS_PASS_MYSITE_ORG="another-ddns-password"
+```
+
+**Setup:** Enable Dynamic DNS in Namecheap dashboard (Domain → Advanced DNS → Dynamic DNS).
+
+### PUBLIC_IP_STATIC
+**Type:** String (IP address)
+**Required:** No
+**Default:** Auto-detect using ipify.org
+**Used in:** DNS failover configuration
+
+Static public IP to use for DNS updates instead of auto-detection.
+
+```bash
+# Use specific IP for DNS failover (recommended for cloud)
+PUBLIC_IP_STATIC="203.0.113.10"
+
+# Auto-detect (recommended for home with dynamic IP)
+# PUBLIC_IP_STATIC=""  # or omit
+```
+
+### DDNS_DOMAINS
+**Type:** String (formatted)
+**Required:** Yes (if DNS failover enabled)
+**Default:** None
+**Format:** `host:domain:password,host:domain:password,...`
+
+Comma-separated list of domains to update on failover.
+
+```bash
+# Single domain (root)
+DDNS_DOMAINS="@:example.com:your-ddns-password"
+
+# Multiple subdomains
+DDNS_DOMAINS="@:example.com:pass1,api:example.com:pass1,www:example.com:pass1"
+
+# Multiple domains
+DDNS_DOMAINS="@:example.com:pass1,@:mysite.org:pass2"
+```
+
+**Format:**
+- `@` = root domain (example.com)
+- `api` = subdomain (api.example.com)
+- Use same password for all hosts under one domain
 
 ## Development & Debugging
 
@@ -253,15 +432,19 @@ export PORT=8080
 
 ## Best Practices
 
-1. **Never commit secrets** to version control
+1. **Never commit secrets** to version control (SECRET_KEY_BASE, CLUSTER_SECRET, DDNS passwords)
 2. **Use staging environment** for Let's Encrypt testing
 3. **Set PHX_SERVER=true** in production deployments
 4. **Use persistent storage** for SSL certificates
 5. **Monitor certificate expiration** (Let's Encrypt auto-renews)
-6. **Set appropriate DNS_CLUSTER_QUERY** for clustered deployments
+6. **Generate strong secrets** using provided tools (mix tasks, openssl)
+7. **Use asymmetric clustering** for cloud + home setups (cloud accepts, home initiates)
+8. **Set NODE_IP explicitly** on cloud servers with static IPs
+9. **Keep firewall ports open** for cluster communication (default: 9100)
 
 ## See Also
 
+- [Clustering Guide](CLUSTERING.md) - High availability setup with Partisan
 - [Docker Deployment Guide](DOCKER.md)
 - [Let's Encrypt Setup Guide](LETSENCRYPT_SETUP.md)
 - [General Setup Instructions](SETUP.md)

@@ -7,7 +7,20 @@ defmodule ElixirGateway.Cluster.Manager do
   - Connect to peer nodes
   - Send periodic health heartbeats
   - Monitor peer health status
+  - Automatically reconnect to disconnected peers
+
+  ## Asymmetric Configuration
+
+  Supports setups where one node has a static IP (cloud) and another has
+  a dynamic IP (home). The dynamic IP node should list the static IP node
+  as a peer, while the static IP node can have an empty peers list.
+
+  This creates a bidirectional connection where the home node reconnects
+  automatically when its IP changes, without requiring the cloud node to
+  track the changing IP address.
   """
+  alias :partisan_peer_service, as: PartisanPeerService
+  alias ElixirGateway.Cluster.IPDetection
 
   use GenServer
   require Logger
@@ -93,11 +106,13 @@ defmodule ElixirGateway.Cluster.Manager do
 
   @impl true
   def handle_info(:send_heartbeat, state) do
-    # Send heartbeat to all peers
-    send_heartbeat_to_peers()
-
     # Update peer health based on connections
+    # Note: We check peer health via members() - no need for explicit heartbeat messages
+    # as Partisan handles connection health internally
     new_peer_health = update_peer_health(state.peers)
+
+    # Attempt to reconnect to disconnected peers
+    reconnect_if_needed(state.peers, new_peer_health)
 
     # Schedule next heartbeat
     schedule_heartbeat(state.heartbeat_interval)
@@ -125,55 +140,85 @@ defmodule ElixirGateway.Cluster.Manager do
 
   ## Private Functions
 
-  defp configure_partisan(node_name, secret, listen_port) do
-    # Set Partisan configuration
-    Application.put_env(:partisan, :partisan_peer_service_manager,
-      :partisan_pluggable_peer_service_manager
+  defp configure_partisan(node_name, shared_secret, listen_port) do
+    # 1. Identity - Use node_name@ip format
+    my_ip = get_node_ip()
+    full_node_name = String.to_atom("#{node_name}@#{my_ip}")
+
+    # 2. Basic Partisan Config
+    # Note: Partisan 5 uses 'name' and 'peer_service_manager' keys
+    Application.put_env(:partisan, :name, full_node_name)
+
+    Application.put_env(
+      :partisan,
+      :peer_service_manager,
+      PartisanPeerService.Manager.DefaultPeerServiceManager
     )
 
-    # Configure node name
-    full_node_name = String.to_atom("#{node_name}@127.0.0.1")
-    Application.put_env(:partisan, :node, full_node_name)
+    # 3. Networking & Storage
+    # Use Ets if you want clean slates, or omit this for disk persistence (default)
+    Application.put_env(:partisan, :listen_addrs, [%{ip: {0, 0, 0, 0}, port: listen_port}])
+    Application.put_env(:partisan, :storage_backend, Partisan.Storage.Backend.Ets)
+    # Application.put_env(:partisan, :data_dir, "/var/lib/partisan_data")
 
-    # Configure listen address
-    Application.put_env(:partisan, :listen_addrs, [
-      %{ip: {0, 0, 0, 0}, port: listen_port}
-    ])
+    # 4. Channels
+    Application.put_env(:partisan, :channels, %{
+      default: %{monotonic: true, parallelism: 1}
+    })
 
-    # Configure channels with encryption
-    Application.put_env(:partisan, :channels, [
-      {:default, %{monotonic: true, parallelism: 1}}
-    ])
+    # 5. TLS with Shared Secret (No Certs)
+    # We use Pre-Shared Key (PSK) authentication
+    # Should be a binary
+    psk_secret = shared_secret
 
-    # Configure TLS with shared secret
+    # Lookup function required by Erlang's :ssl for PSK
+    # It verifies the identity and returns the secret key
+    lookup_fun = {fn :psk, _id, _user_data -> {:ok, psk_secret} end, []}
+
     Application.put_env(:partisan, :tls, true)
-    Application.put_env(:partisan, :tls_server_options, [
-      {:certfile, generate_cert_path(node_name, secret)},
-      {:keyfile, generate_key_path(node_name, secret)}
-    ])
-    Application.put_env(:partisan, :tls_client_options, [
-      {:verify, :verify_none}  # Using shared secret, not PKI
-    ])
 
-    # Start Partisan
-    {:ok, _} = Application.ensure_all_started(:partisan)
+    # Shared options for both Client and Server
+    psk_options = [
+      {:psk_identity, "partisan_cluster"},
+      {:user_lookup_fun, lookup_fun},
+      # PSK ciphersuites (required for non-cert auth)
+      {:ciphers, [:psk_with_aes_128_cbc_sha]}
+    ]
 
-    Logger.info("Partisan configured for node #{full_node_name} on port #{listen_port}")
+    Application.put_env(:partisan, :tls_server_options, psk_options)
+    Application.put_env(:partisan, :tls_client_options, psk_options)
+
+    # 6. Start Application
+    case Application.ensure_all_started(:partisan) do
+      {:ok, _} ->
+        Logger.info(
+          "Partisan 5.0.3 started as #{full_node_name} on port #{listen_port} (PSK Enabled)"
+        )
+
+        {:ok, full_node_name}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp connect_to_peer(peer_address, _config) do
-    # Parse peer address (e.g., "gateway-b.example.com:9100")
+    # Parse peer address (e.g., "gateway-b.example.com:9100" or "192.168.1.10:9100")
     case parse_peer_address(peer_address) do
       {:ok, host, port} ->
-        # Create Partisan node specification
+        # Extract node name from hostname (first part before .)
+        # For "gateway-b.example.com" -> "gateway-b"
+        # For "192.168.1.10" -> "192.168.1.10" (IP as-is)
+        peer_node_name = extract_node_name(host)
+
+        # Create Partisan node specification using name@host format
         peer_node = %{
-          name: String.to_atom("peer@#{host}"),
-          listen_addrs: [%{ip: to_charlist(host), port: port}],
-          channels: [:default]
+          name: String.to_atom("#{peer_node_name}@#{host}"),
+          listen_addrs: [%{ip: to_charlist(host), port: port}]
         }
 
         # Attempt to join the peer
-        case :partisan_peer_service.join(peer_node) do
+        case PartisanPeerService.join(peer_node) do
           :ok ->
             Logger.info("Successfully connected to peer: #{peer_address}")
             :ok
@@ -203,28 +248,16 @@ defmodule ElixirGateway.Cluster.Manager do
   end
 
   defp get_partisan_peers do
-    case :partisan_peer_service.members() do
-      peers when is_list(peers) ->
-        Enum.reject(peers, fn peer ->
-          peer == :partisan_peer_service.myself()
-        end)
+    # Get the list of cluster members
+    {:ok, members} = PartisanPeerService.members()
 
-      _ ->
-        []
-    end
-  end
+    # Get our own identity to filter it out
+    myself = :partisan.node_spec()
 
-  defp send_heartbeat_to_peers do
-    peers = get_partisan_peers()
-
-    Enum.each(peers, fn peer ->
-      # Send a simple ping message
-      :partisan_peer_service.forward_message(
-        peer,
-        __MODULE__,
-        {:heartbeat, node()}
-      )
-    end)
+    # Filter out self. Note: 'members' usually returns a list of names (atoms).
+    # 'myself' returns a full spec map. We compare the name field.
+    members
+    |> Enum.reject(fn member_name -> member_name == myself.name end)
   end
 
   defp update_peer_health(configured_peers) do
@@ -252,17 +285,62 @@ defmodule ElixirGateway.Cluster.Manager do
     end)
   end
 
+  defp reconnect_if_needed(configured_peers, peer_health) do
+    Enum.each(configured_peers, fn peer ->
+      case Map.get(peer_health, peer) do
+        :disconnected ->
+          Logger.info("Attempting to reconnect to disconnected peer: #{peer}")
+          connect_to_peer(peer, [])
+
+        _ ->
+          :ok
+      end
+    end)
+  end
+
+  defp get_node_ip do
+    # Try to get IP from config first
+    config = Application.get_env(:elixirgateway, :cluster, [])
+
+    case Keyword.get(config, :node_ip) do
+      nil ->
+        # Auto-detect public IP
+        case IPDetection.get_public_ip() do
+          {:ok, ip} ->
+            ip
+
+          {:error, reason} ->
+            Logger.warning("Failed to detect public IP (#{inspect(reason)}), falling back to local IP")
+
+            # Fallback to local IP detection
+            case IPDetection.get_local_ip() do
+              {:ok, ip} ->
+                ip
+
+              {:error, _} ->
+                Logger.error("Could not detect any IP address, using 127.0.0.1")
+                "127.0.0.1"
+            end
+        end
+
+      ip when is_binary(ip) ->
+        ip
+    end
+  end
+
+  defp extract_node_name(host) do
+    # If it looks like an IP address, use it as-is
+    # Otherwise, extract first part of hostname
+    if String.match?(host, ~r/^\d+\.\d+\.\d+\.\d+$/) do
+      # It's an IP address, use as-is
+      host
+    else
+      # It's a hostname, extract first part before '.'
+      host |> String.split(".") |> List.first()
+    end
+  end
+
   defp schedule_heartbeat(interval) do
     Process.send_after(self(), :send_heartbeat, interval)
-  end
-
-  # Generate self-signed cert paths based on shared secret
-  # In production, you'd use proper cert generation
-  defp generate_cert_path(node_name, _secret) do
-    Path.join([System.tmp_dir(), "partisan_#{node_name}.crt"])
-  end
-
-  defp generate_key_path(node_name, _secret) do
-    Path.join([System.tmp_dir(), "partisan_#{node_name}.key"])
   end
 end

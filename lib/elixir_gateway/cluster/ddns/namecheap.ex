@@ -13,8 +13,9 @@ defmodule ElixirGateway.Cluster.DDNS.Namecheap do
 
   require Logger
 
+  alias ElixirGateway.Cluster.IPDetection
+
   @ddns_url "https://dynamicdns.park-your-domain.com/update"
-  @public_ip_service "https://api.ipify.org"
 
   @doc """
   Updates all configured domains with the specified IP address.
@@ -65,23 +66,11 @@ defmodule ElixirGateway.Cluster.DDNS.Namecheap do
   @doc """
   Gets the public IP address of this server.
 
-  Uses ipify.org by default. Returns {:ok, ip} or {:error, reason}.
+  Delegates to ElixirGateway.Cluster.IPDetection.
+  Returns {:ok, ip} or {:error, reason}.
   """
   def get_public_ip do
-    case Req.get(@public_ip_service) do
-      {:ok, %{status: 200, body: ip}} ->
-        ip = String.trim(ip)
-        Logger.debug("Detected public IP: #{ip}")
-        {:ok, ip}
-
-      {:ok, %{status: status, body: body}} ->
-        Logger.error("Failed to get public IP, status #{status}: #{body}")
-        {:error, "HTTP #{status}"}
-
-      {:error, reason} ->
-        Logger.error("Failed to get public IP: #{inspect(reason)}")
-        {:error, reason}
-    end
+    IPDetection.get_public_ip()
   end
 
   ## Private Functions

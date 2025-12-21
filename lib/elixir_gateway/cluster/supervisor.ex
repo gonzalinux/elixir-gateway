@@ -52,8 +52,6 @@ defmodule ElixirGateway.Cluster.Supervisor do
 
     if Keyword.get(dns_config, :enabled, false) do
       {ElixirGateway.Cluster.DNSFailover, dns_config}
-    else
-      nil
     end
   end
 

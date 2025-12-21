@@ -46,7 +46,7 @@ defmodule ElixirGateway.MixProject do
       {:prom_ex, "~> 1.9"},
       {:site_encrypt, "~> 0.6"},
       {:gun, "~> 2.0"},
-      {:partisan, "~> 5.0"},
+      {:partisan, "~> 5.0.3"},
       {:syn, "~> 3.3"},
       {:req, "~> 0.4"},
       {:tidewave, "~> 0.1", only: :dev},
