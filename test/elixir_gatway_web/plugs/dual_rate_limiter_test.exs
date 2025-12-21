@@ -6,9 +6,9 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
 
   setup do
     # Set up test configuration
-    original_config = Application.get_env(:elixirgateway, :gateway)
+    original_config = Application.get_env(:elixir_gateway, :gateway)
 
-    Application.put_env(:elixirgateway, :gateway,
+    Application.put_env(:elixir_gateway, :gateway,
       rate_limit: [
         # Low for easier testing
         user_requests_per_minute: 5,
@@ -20,9 +20,9 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
 
     on_exit(fn ->
       if original_config do
-        Application.put_env(:elixirgateway, :gateway, original_config)
+        Application.put_env(:elixir_gateway, :gateway, original_config)
       else
-        Application.delete_env(:elixirgateway, :gateway)
+        Application.delete_env(:elixir_gateway, :gateway)
       end
     end)
 

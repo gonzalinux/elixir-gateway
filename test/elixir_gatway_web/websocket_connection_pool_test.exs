@@ -47,9 +47,9 @@ defmodule ElixirGatewayWeb.WebSocketConnectionPoolTest do
     @tag :integration
     test "respects pool size limits" do
       # Set a small pool size for testing
-      original_config = Application.get_env(:elixirgateway, :websocket)
+      original_config = Application.get_env(:elixir_gateway, :websocket)
 
-      Application.put_env(:elixirgateway, :websocket,
+      Application.put_env(:elixir_gateway, :websocket,
         connection_pool: [size: 2, max_idle_time: 300_000, cleanup_interval: 60_000]
       )
 
@@ -65,9 +65,9 @@ defmodule ElixirGatewayWeb.WebSocketConnectionPoolTest do
 
       # Restore original config
       if original_config do
-        Application.put_env(:elixirgateway, :websocket, original_config)
+        Application.put_env(:elixir_gateway, :websocket, original_config)
       else
-        Application.delete_env(:elixirgateway, :websocket)
+        Application.delete_env(:elixir_gateway, :websocket)
       end
     end
 

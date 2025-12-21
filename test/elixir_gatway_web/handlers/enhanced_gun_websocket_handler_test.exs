@@ -9,9 +9,9 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
     :ets.delete_all_objects(:websocket_connection_pool)
 
     # Set test configuration
-    original_config = Application.get_env(:elixirgateway, :websocket)
+    original_config = Application.get_env(:elixir_gateway, :websocket)
 
-    Application.put_env(:elixirgateway, :websocket,
+    Application.put_env(:elixir_gateway, :websocket,
       # Shorter for testing
       upgrade_timeout: 5_000,
       connection_pool: [
@@ -34,9 +34,9 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
 
     on_exit(fn ->
       if original_config do
-        Application.put_env(:elixirgateway, :websocket, original_config)
+        Application.put_env(:elixir_gateway, :websocket, original_config)
       else
-        Application.delete_env(:elixirgateway, :websocket)
+        Application.delete_env(:elixir_gateway, :websocket)
       end
     end)
 

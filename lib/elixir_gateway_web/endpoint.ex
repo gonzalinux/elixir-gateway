@@ -1,5 +1,5 @@
 defmodule ElixirGatewayWeb.Endpoint do
-  use SiteEncrypt.Phoenix.Endpoint, otp_app: :elixirgateway
+  use SiteEncrypt.Phoenix.Endpoint, otp_app: :elixir_gateway
 
   @impl SiteEncrypt
   def certification do
@@ -21,7 +21,7 @@ defmodule ElixirGatewayWeb.Endpoint do
 
       # set OS env var CERT_MODE to "staging" or "production" on staging/production hosts
       directory_url:
-        case Application.get_env(:elixirgateway, :env) do
+        case Application.get_env(:elixir_gateway, :env) do
           :dev -> {:internal, port: 4002}
           :test -> {:internal, port: 4002}
           :stage -> "https://acme-staging-v02.api.letsencrypt.org/directory"

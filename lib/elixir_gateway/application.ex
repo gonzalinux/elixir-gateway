@@ -10,12 +10,14 @@ defmodule ElixirGateway.Application do
     children = [
       ElixirGateway.PromEx,
       ElixirGatewayWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:elixirgateway, :dns_cluster_query) || :ignore},
+      {DNSCluster, query: Application.get_env(:elixir_gateway, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: ElixirGateway.PubSub},
       # Start Finch for HTTP client
       {Finch, name: ElixirGateway.Finch},
       # Start WebSocket connection pool
       ElixirGatewayWeb.WebSocketConnectionPool,
+      # Start cluster supervisor (no-op if clustering disabled)
+      {ElixirGateway.Cluster.Supervisor, []},
       # Start to serve requests, typically the last entry
       ElixirGatewayWeb.Endpoint
     ]

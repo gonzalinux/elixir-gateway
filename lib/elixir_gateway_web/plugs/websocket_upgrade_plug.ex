@@ -13,13 +13,43 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
   def init(_opts), do: []
 
   @impl Plug
-  def call(%Plug.Conn{} = conn, _opts) do
+  def call(%Plug.Conn{} = conn, opts) do
+    # Check cluster affinity first
+    case ElixirGateway.Cluster.ConnectionRegistry.get_node(conn) do
+      :local ->
+        process_locally(conn, opts)
+
+      {:remote, node} ->
+        # Forward to remote node
+        Logger.info("Forwarding request to remote node: #{node}")
+        forward_to_node(conn, node)
+
+      :not_clustered ->
+        # Clustering disabled, process locally
+        process_locally(conn, opts)
+    end
+  end
+
+  defp process_locally(%Plug.Conn{} = conn, _opts) do
     if websocket_upgrade_request?(conn) do
       Logger.debug("WebSocket upgrade detected for: #{conn.request_path}")
       handle_websocket_upgrade(conn)
     else
       conn
     end
+  end
+
+  defp forward_to_node(conn, _node) do
+    # For WebSocket connections, we can't easily forward to another node
+    # Instead, we return an error and let the client reconnect
+    # The DNS should be updated to point to the correct node
+    Logger.warning("WebSocket affinity conflict - connection exists on different node")
+
+    conn
+    |> put_status(503)
+    |> put_resp_content_type("text/plain")
+    |> send_resp(503, "Service temporarily unavailable - please reconnect")
+    |> halt()
   end
 
   defp websocket_upgrade_request?(conn) do
@@ -36,7 +66,7 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
 
   defp handle_websocket_upgrade(conn) do
     host = conn.host
-    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
+    services = Application.get_env(:elixir_gateway, :gateway)[:services] || %{}
 
     case Map.get(services, host) do
       nil ->

@@ -160,7 +160,7 @@ defmodule ElixirGatewayWeb.WebSocketConnectionPool do
     target_host = extract_host_from_url(target_url)
 
     # Check if we've reached the pool limit for this host
-    pool_config = Application.get_env(:elixirgateway, :websocket)[:connection_pool]
+    pool_config = Application.get_env(:elixir_gateway, :websocket)[:connection_pool]
     max_size = Keyword.get(pool_config, :size, 10)
 
     current_count = count_connections_for_host(target_host)
@@ -367,7 +367,7 @@ defmodule ElixirGatewayWeb.WebSocketConnectionPool do
   end
 
   defp cleanup_idle_connections do
-    pool_config = Application.get_env(:elixirgateway, :websocket)[:connection_pool]
+    pool_config = Application.get_env(:elixir_gateway, :websocket)[:connection_pool]
     max_idle_time = Keyword.get(pool_config, :max_idle_time, 300_000)
     current_time = System.system_time(:millisecond)
     cutoff_time = current_time - max_idle_time

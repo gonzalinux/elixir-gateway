@@ -3,7 +3,7 @@ defmodule ElixirGateway.PromEx do
   PromEx configuration for the API Gateway.
   """
 
-  use PromEx, otp_app: :elixirgateway
+  use PromEx, otp_app: :elixir_gateway
 
   alias PromEx.Plugins
 
@@ -36,7 +36,7 @@ defmodule ElixirGateway.PromEx do
       {:prom_ex, "phoenix.json"},
 
       # Custom gateway dashboard
-      {:elixirgateway, "gateway.json"}
+      {:elixir_gateway, "gateway.json"}
     ]
   end
 end

@@ -8,9 +8,9 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
   describe "domain routing" do
     setup do
       # Set up test configuration
-      original_config = Application.get_env(:elixirgateway, :gateway)
+      original_config = Application.get_env(:elixir_gateway, :gateway)
 
-      Application.put_env(:elixirgateway, :gateway,
+      Application.put_env(:elixir_gateway, :gateway,
         services: %{
           "api.example.com" => "http://backend1.local:8080",
           "admin.example.com" => "https://backend2.local:9443",
@@ -20,9 +20,9 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
 
       on_exit(fn ->
         if original_config do
-          Application.put_env(:elixirgateway, :gateway, original_config)
+          Application.put_env(:elixir_gateway, :gateway, original_config)
         else
-          Application.delete_env(:elixirgateway, :gateway)
+          Application.delete_env(:elixir_gateway, :gateway)
         end
       end)
 
@@ -130,7 +130,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
 
   describe "configuration edge cases" do
     test "handles missing gateway config gracefully" do
-      Application.delete_env(:elixirgateway, :gateway)
+      Application.delete_env(:elixir_gateway, :gateway)
 
       conn =
         conn(:get, "/")
@@ -142,7 +142,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
     end
 
     test "handles empty services config" do
-      Application.put_env(:elixirgateway, :gateway, services: %{})
+      Application.put_env(:elixir_gateway, :gateway, services: %{})
 
       conn =
         conn(:get, "/")

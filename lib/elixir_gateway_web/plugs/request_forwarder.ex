@@ -8,7 +8,24 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
   def init(opts), do: opts
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
+    # Check cluster affinity first
+    case ElixirGateway.Cluster.ConnectionRegistry.get_node(conn) do
+      :local ->
+        process_locally(conn, opts)
+
+      {:remote, node} ->
+        # Forward to remote node
+        Logger.info("Request affinity points to remote node: #{node}")
+        forward_to_remote_node(conn, node)
+
+      :not_clustered ->
+        # Clustering disabled, process locally
+        process_locally(conn, opts)
+    end
+  end
+
+  defp process_locally(conn, _opts) do
     target_url = conn.assigns[:target_url]
 
     if target_url do
@@ -16,6 +33,17 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     else
       conn
     end
+  end
+
+  defp forward_to_remote_node(conn, _node) do
+    # For now, return an error and let client retry
+    # DNS failover will direct them to the correct node
+    Logger.warning("Request affinity conflict - session exists on different node")
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(503, Jason.encode!(%{error: "Service temporarily unavailable - please retry"}))
+    |> halt()
   end
 
   defp forward_request(conn, target_url) do

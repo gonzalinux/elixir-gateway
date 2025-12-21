@@ -3,7 +3,7 @@ defmodule ElixirGateway.MixProject do
 
   def project do
     [
-      app: :elixirgateway,
+      app: :elixir_gateway,
       version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -19,7 +19,8 @@ defmodule ElixirGateway.MixProject do
   def application do
     [
       mod: {ElixirGateway.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools],
+      included_applications: [:partisan, :syn]
     ]
   end
 
@@ -45,6 +46,9 @@ defmodule ElixirGateway.MixProject do
       {:prom_ex, "~> 1.9"},
       {:site_encrypt, "~> 0.6"},
       {:gun, "~> 2.0"},
+      {:partisan, "~> 5.0"},
+      {:syn, "~> 3.3"},
+      {:req, "~> 0.4"},
       {:tidewave, "~> 0.1", only: :dev},
       {:bypass, "~> 2.1", only: :test},
       {:mock, "~> 0.3.0", only: :test}

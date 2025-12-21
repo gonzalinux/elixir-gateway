@@ -6,7 +6,7 @@ import Config
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :elixirgateway, ElixirGatewayWeb.Endpoint,
+config :elixir_gateway, ElixirGatewayWeb.Endpoint,
   # Binding to all interfaces to allow testing from other machines
   http: [ip: {0, 0, 0, 0}, port: 4000],
   check_origin: false,
@@ -16,7 +16,7 @@ config :elixirgateway, ElixirGatewayWeb.Endpoint,
   watchers: []
 
 # Example gateway services configuration for development
-config :elixirgateway, :gateway,
+config :elixir_gateway, :gateway,
   services: %{
     "default" => "http://localhost:5000",
     "localhost" => "http://localhost:5000"
@@ -50,7 +50,7 @@ config :elixirgateway, :gateway,
 # different ports.
 
 # Enable dev routes for dashboard and mailbox
-config :elixirgateway, dev_routes: true
+config :elixir_gateway, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :console, format: "[$level] $message\n"

@@ -6,9 +6,9 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlugTest do
 
   setup do
     # Set up test configuration
-    original_config = Application.get_env(:elixirgateway, :gateway)
+    original_config = Application.get_env(:elixir_gateway, :gateway)
 
-    Application.put_env(:elixirgateway, :gateway,
+    Application.put_env(:elixir_gateway, :gateway,
       services: %{
         "ws.example.com" => "http://backend.local:8080",
         "secure-ws.example.com" => "https://backend.local:9443",
@@ -18,9 +18,9 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlugTest do
 
     on_exit(fn ->
       if original_config do
-        Application.put_env(:elixirgateway, :gateway, original_config)
+        Application.put_env(:elixir_gateway, :gateway, original_config)
       else
-        Application.delete_env(:elixirgateway, :gateway)
+        Application.delete_env(:elixir_gateway, :gateway)
       end
     end)
 
@@ -313,7 +313,7 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlugTest do
 
   describe "configuration edge cases" do
     test "handles missing gateway config", %{conn: conn} do
-      Application.delete_env(:elixirgateway, :gateway)
+      Application.delete_env(:elixir_gateway, :gateway)
 
       conn =
         conn
@@ -327,7 +327,7 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlugTest do
     end
 
     test "handles empty services config", %{conn: conn} do
-      Application.put_env(:elixirgateway, :gateway, services: %{})
+      Application.put_env(:elixir_gateway, :gateway, services: %{})
 
       conn =
         conn

@@ -31,7 +31,7 @@ defmodule ElixirGatewayWeb.Router do
   end
 
   # Enable LiveDashboard in development (must come before catch-all)
-  if Application.compile_env(:elixirgateway, :dev_routes) do
+  if Application.compile_env(:elixir_gateway, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
