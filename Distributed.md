@@ -8,7 +8,7 @@ Enable two ElixirGateway instances (e.g., home + cloud) to operate as a single l
 
 ```elixir
 # config/runtime.exs — Only needed if user enables clustering
-config :elixir_gateway, :cluster,
+config :elixirgateway, :cluster,
   enabled: true,  # Default: false
   secret: System.get_env("CLUSTER_SECRET"),
   node_name: System.get_env("NODE_NAME"),
@@ -109,10 +109,10 @@ end
 
 ```elixir
 # Default (clustering off)
-config :elixir_gateway, :cluster, enabled: false
+config :elixirgateway, :cluster, enabled: false
 
 # Full options
-config :elixir_gateway, :cluster,
+config :elixirgateway, :cluster,
   enabled: false,                    # Opt-in
   secret: nil,                       # Required if enabled
   node_name: nil,                    # Required if enabled

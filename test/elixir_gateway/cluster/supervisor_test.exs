@@ -5,14 +5,14 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
 
   setup do
     # Save original config
-    original_config = Application.get_env(:elixir_gateway, :cluster)
+    original_config = Application.get_env(:elixirgateway, :cluster)
 
     on_exit(fn ->
       # Restore original config or delete if it didn't exist
       if original_config do
-        Application.put_env(:elixir_gateway, :cluster, original_config)
+        Application.put_env(:elixirgateway, :cluster, original_config)
       else
-        Application.delete_env(:elixir_gateway, :cluster)
+        Application.delete_env(:elixirgateway, :cluster)
       end
 
       # Stop supervisor if it's running
@@ -28,7 +28,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
   describe "when clustering is disabled (default)" do
     test "starts successfully with no children" do
       # Set disabled config
-      Application.put_env(:elixir_gateway, :cluster, enabled: false)
+      Application.put_env(:elixirgateway, :cluster, enabled: false)
 
       assert {:ok, pid} = ClusterSupervisor.start_link([])
       assert Process.alive?(pid)
@@ -42,7 +42,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
 
     test "starts successfully with nil config" do
       # Delete config entirely
-      Application.delete_env(:elixir_gateway, :cluster)
+      Application.delete_env(:elixirgateway, :cluster)
 
       assert {:ok, pid} = ClusterSupervisor.start_link([])
       assert Process.alive?(pid)
@@ -56,7 +56,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
 
   describe "when clustering is enabled" do
     test "raises error if secret is missing" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         node_name: "test-node",
         peers: ["peer1:9100"]
@@ -69,7 +69,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     end
 
     test "raises error if node_name is missing" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: String.duplicate("a", 64),
         peers: ["peer1:9100"]
@@ -82,7 +82,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     end
 
     test "raises error if peers is missing" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-node"
@@ -95,7 +95,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     end
 
     test "raises error if peers is empty" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-node",
@@ -109,7 +109,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     end
 
     test "raises error if secret is empty string" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: "",
         node_name: "test-node",
@@ -122,7 +122,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     end
 
     test "raises error if node_name is empty string" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "  ",
@@ -137,7 +137,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
 
   describe "configuration validation message" do
     test "provides helpful error message with example config" do
-      Application.put_env(:elixir_gateway, :cluster,
+      Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         node_name: "test-node"
         # Missing secret and peers
@@ -149,7 +149,7 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     rescue
       error in ArgumentError ->
         message = Exception.message(error)
-        assert message =~ "config :elixir_gateway, :cluster"
+        assert message =~ "config :elixirgateway, :cluster"
         assert message =~ "enabled: true"
         assert message =~ "CLUSTER_SECRET"
     end

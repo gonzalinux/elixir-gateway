@@ -413,7 +413,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   end
 
   defp get_websocket_config do
-    config = Application.get_env(:elixir_gateway, :websocket, [])
+    config = Application.get_env(:elixirgateway, :websocket, [])
 
     Map.merge(@default_config, %{
       upgrade_timeout: Keyword.get(config, :upgrade_timeout, @default_config.upgrade_timeout),

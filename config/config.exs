@@ -7,12 +7,12 @@
 # General application configuration
 import Config
 
-config :elixir_gateway,
+config :elixirgateway,
   generators: [timestamp_type: :utc_datetime]
 
 # Gateway configuration
 # Modify it with your proxied services
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
     # default is used when no host comes in the headers
     "default" => "http://localhost:8000",
@@ -25,7 +25,7 @@ config :elixir_gateway, :gateway,
   ]
 
 # Configures the endpoint
-config :elixir_gateway, ElixirGatewayWeb.Endpoint,
+config :elixirgateway, ElixirGatewayWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
@@ -44,7 +44,7 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 # Configure Finch for HTTP client
-config :elixir_gateway, :finch,
+config :elixirgateway, :finch,
   name: ElixirGateway.Finch,
   pools: %{
     :default => [size: 25, max_idle_time: 30_000]
@@ -55,7 +55,7 @@ config :hammer,
   backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 2, cleanup_interval_ms: 60_000 * 10]}
 
 # Configure WebSocket settings
-config :elixir_gateway, :websocket,
+config :elixirgateway, :websocket,
   # WebSocket upgrade timeout (30 seconds default, configurable for slow networks)
   upgrade_timeout: 30_000,
   # Connection pool settings per target host
@@ -87,7 +87,7 @@ config :elixir_gateway, :websocket,
   ]
 
 # Configure clustering (opt-in, disabled by default)
-config :elixir_gateway, :cluster,
+config :elixirgateway, :cluster,
   enabled: false,
   secret: nil,
   node_name: nil,
@@ -102,7 +102,7 @@ config :elixir_gateway, :cluster,
     domains: []
   ]
 
-config :elixir_gateway, env: config_env()
+config :elixirgateway, env: config_env()
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

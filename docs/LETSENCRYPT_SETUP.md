@@ -88,7 +88,7 @@ MIX_ENV=prod mix phx.server
 ```bash
 # Ensure proper permissions
 sudo mkdir -p /etc/elixir_gateway/certs
-sudo chown -R elixir_gateway:elixir_gateway /etc/elixir_gateway/certs
+sudo chown -R elixir_gateway:elixirgateway /etc/elixir_gateway/certs
 sudo chmod 700 /etc/elixir_gateway/certs
 ```
 

@@ -72,7 +72,7 @@ Following the order specified in Distributed.md:
 
 ### Configuration Schema
 ```elixir
-config :elixir_gateway, :cluster,
+config :elixirgateway, :cluster,
   enabled: false,                    # Opt-in (default: false)
   secret: nil,                       # Required if enabled
   node_name: nil,                    # Required if enabled

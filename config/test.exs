@@ -2,13 +2,13 @@ import Config
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
-config :elixir_gateway, ElixirGatewayWeb.Endpoint,
+config :elixirgateway, ElixirGatewayWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "0Mpg/nHivCKkN4rFWz+wcVsGklGVzT2ZWHsSkwlW6cGuVcvGtKZt9Ip6fkoYQIJ1",
   server: false
 
 # Gateway configuration for tests
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
     "default" => "http://localhost:8000",
     "test-service.com" => "http://localhost:9000",

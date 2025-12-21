@@ -66,7 +66,7 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
 
   defp handle_websocket_upgrade(conn) do
     host = conn.host
-    services = Application.get_env(:elixir_gateway, :gateway)[:services] || %{}
+    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
 
     case Map.get(services, host) do
       nil ->

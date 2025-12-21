@@ -28,7 +28,7 @@ Upgrade: websocket
 **Domain Routing**:
 Uses the same domain-to-service mapping from application configuration:
 ```elixir
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
     "app.example.com" => "http://192.168.1.10:4000",
     "api.example.com" => "https://192.168.1.11:8080"
@@ -188,7 +188,7 @@ While not explicitly LiveView-specific, this proxy architecture fully supports P
 WebSocket proxying uses the same configuration as HTTP proxying - no additional setup required:
 
 ```elixir
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
     "liveview-app.com" => "http://localhost:4000",
     "websocket-api.com" => "https://internal.api:8080"

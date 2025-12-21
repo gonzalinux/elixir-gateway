@@ -19,7 +19,7 @@ defmodule Mix.Tasks.ElixirGateway.Gen.ClusterSecret do
       export CLUSTER_SECRET=a1b2c3d4e5f6...
 
       # Or in config/runtime.exs
-      config :elixir_gateway, :cluster,
+      config :elixirgateway, :cluster,
         secret: System.get_env("CLUSTER_SECRET")
 
   ## Alternative Method
@@ -49,7 +49,7 @@ defmodule Mix.Tasks.ElixirGateway.Gen.ClusterSecret do
        export CLUSTER_SECRET=#{secret}
 
     2. Configure in config/runtime.exs:
-       config :elixir_gateway, :cluster,
+       config :elixirgateway, :cluster,
          enabled: true,
          secret: System.get_env("CLUSTER_SECRET"),
          node_name: System.get_env("NODE_NAME"),

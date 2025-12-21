@@ -9,7 +9,7 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    rate_limit_config = Application.get_env(:elixir_gateway, :gateway)[:rate_limit] || []
+    rate_limit_config = Application.get_env(:elixirgateway, :gateway)[:rate_limit] || []
     user_requests_per_minute = Keyword.get(rate_limit_config, :user_requests_per_minute, 100)
     ip_requests_per_minute = Keyword.get(rate_limit_config, :ip_requests_per_minute, 500)
 

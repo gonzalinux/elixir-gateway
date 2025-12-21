@@ -3,7 +3,7 @@ defmodule ElixirGateway.MixProject do
 
   def project do
     [
-      app: :elixir_gateway,
+      app: :elixirgateway,
       version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),

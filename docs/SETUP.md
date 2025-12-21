@@ -8,7 +8,7 @@ Complete configuration and deployment instructions for Elixir-Gateway.
 Edit your configuration file to map domains to internal services:
 
 ```elixir
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
     "api.example.com" => "http://192.168.1.10:8080",
     "admin.example.com" => "https://192.168.1.11:8443"
@@ -81,7 +81,7 @@ Available metrics:
 ### Rate Limiting
 Configure rate limits per user:
 ```elixir
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   rate_limit: [
     requests_per_minute: 100,
     cleanup_interval: :timer.minutes(1)

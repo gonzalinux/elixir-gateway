@@ -15,7 +15,7 @@ defmodule ElixirGateway.Cluster.Supervisor do
 
   @impl true
   def init(_opts) do
-    config = Application.get_env(:elixir_gateway, :cluster, [])
+    config = Application.get_env(:elixirgateway, :cluster, [])
     enabled = Keyword.get(config, :enabled, false)
 
     if enabled do
@@ -31,17 +31,18 @@ defmodule ElixirGateway.Cluster.Supervisor do
   defp start_cluster_children(config) do
     validate_config!(config)
 
-    children = [
-      # Cluster manager handles Partisan setup and peer connections
-      {ElixirGateway.Cluster.Manager, config},
+    children =
+      [
+        # Cluster manager handles Partisan setup and peer connections
+        {ElixirGateway.Cluster.Manager, config},
 
-      # Connection registry for distributed sticky sessions
-      {ElixirGateway.Cluster.ConnectionRegistry, []},
+        # Connection registry for distributed sticky sessions
+        {ElixirGateway.Cluster.ConnectionRegistry, []},
 
-      # DNS failover monitor (only if DNS failover is enabled)
-      dns_failover_child(config)
-    ]
-    |> Enum.reject(&is_nil/1)
+        # DNS failover monitor (only if DNS failover is enabled)
+        dns_failover_child(config)
+      ]
+      |> Enum.reject(&is_nil/1)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -62,13 +63,14 @@ defmodule ElixirGateway.Cluster.Supervisor do
     Enum.each(required_fields, fn field ->
       value = Keyword.get(config, field)
 
-      if is_nil(value) or (is_list(value) and value == []) or (is_binary(value) and String.trim(value) == "") do
+      if is_nil(value) or (is_list(value) and value == []) or
+           (is_binary(value) and String.trim(value) == "") do
         raise ArgumentError, """
         Clustering is enabled but required field :#{field} is missing or empty.
 
         Please configure in config/runtime.exs:
 
-        config :elixir_gateway, :cluster,
+        config :elixirgateway, :cluster,
           enabled: true,
           secret: System.get_env("CLUSTER_SECRET"),
           node_name: System.get_env("NODE_NAME"),

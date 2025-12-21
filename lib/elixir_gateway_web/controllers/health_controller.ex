@@ -11,7 +11,7 @@ defmodule ElixirGatewayWeb.HealthController do
     status = %{
       status: "healthy",
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
-      version: Application.spec(:elixir_gateway, :vsn) |> to_string(),
+      version: Application.spec(:elixirgateway, :vsn) |> to_string(),
       uptime: uptime_total,
       checks: perform_health_checks()
     }
@@ -150,7 +150,7 @@ defmodule ElixirGatewayWeb.HealthController do
   defp check_configuration do
     # Check if gateway configuration is valid
     try do
-      config = Application.get_env(:elixir_gateway, :gateway)
+      config = Application.get_env(:elixirgateway, :gateway)
 
       case config do
         %{services: services} when is_map(services) and map_size(services) > 0 ->
@@ -167,7 +167,7 @@ defmodule ElixirGatewayWeb.HealthController do
 
   defp check_gateway_services do
     # Check if at least one gateway service is configured
-    config = Application.get_env(:elixir_gateway, :gateway)
+    config = Application.get_env(:elixirgateway, :gateway)
 
     case config do
       %{services: services} when is_map(services) and map_size(services) > 0 ->

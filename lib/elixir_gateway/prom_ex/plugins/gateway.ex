@@ -36,8 +36,8 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       {__MODULE__, :execute_connections_total, []},
       [
         last_value(
-          [:elixir_gateway, :connections, :total],
-          event_name: [:elixir_gateway, :connections, :total],
+          [:elixirgateway, :connections, :total],
+          event_name: [:elixirgateway, :connections, :total],
           description: "Total number of active connections",
           measurement: :count
         )
@@ -52,8 +52,8 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       {__MODULE__, :execute_rate_limits, []},
       [
         last_value(
-          [:elixir_gateway, :rate_limit, :violations],
-          event_name: [:elixir_gateway, :rate_limit, :violations],
+          [:elixirgateway, :rate_limit, :violations],
+          event_name: [:elixirgateway, :rate_limit, :violations],
           description: "Number of rate limit violations",
           measurement: :count,
           tags: [:user_type]
@@ -67,14 +67,14 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       :gateway_request_metrics,
       [
         counter(
-          [:elixir_gateway, :request, :total],
-          event_name: [:elixir_gateway, :request, :complete],
+          [:elixirgateway, :request, :total],
+          event_name: [:elixirgateway, :request, :complete],
           description: "Total number of requests processed",
           tags: [:method, :status, :target_service]
         ),
         distribution(
-          [:elixir_gateway, :request, :duration, :milliseconds],
-          event_name: [:elixir_gateway, :request, :complete],
+          [:elixirgateway, :request, :duration, :milliseconds],
+          event_name: [:elixirgateway, :request, :complete],
           description: "Request duration in milliseconds",
           measurement: :duration,
           unit: {:native, :millisecond},
@@ -90,8 +90,8 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       :gateway_response_time_metrics,
       [
         distribution(
-          [:elixir_gateway, :response_time, :seconds],
-          event_name: [:elixir_gateway, :request, :complete],
+          [:elixirgateway, :response_time, :seconds],
+          event_name: [:elixirgateway, :request, :complete],
           description: "Response time distribution",
           measurement: :duration,
           unit: {:native, :second},
@@ -106,13 +106,13 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
   def execute_connections_total do
     # This would normally query the actual connection count
     # For now, return a static value
-    :telemetry.execute([:elixir_gateway, :connections, :total], %{count: 0})
+    :telemetry.execute([:elixirgateway, :connections, :total], %{count: 0})
   end
 
   def execute_rate_limits do
     # This would normally query rate limit violations from Hammer
     # For now, return static values
-    :telemetry.execute([:elixir_gateway, :rate_limit, :violations], %{count: 0}, %{
+    :telemetry.execute([:elixirgateway, :rate_limit, :violations], %{count: 0}, %{
       user_type: "anonymous"
     })
   end

@@ -10,7 +10,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
 
   def call(conn, _opts) do
     host = get_host(conn)
-    services = Application.get_env(:elixir_gateway, :gateway)[:services] || %{}
+    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
 
     case Map.get(services, host) do
       nil ->

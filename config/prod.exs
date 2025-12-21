@@ -4,7 +4,7 @@ import Config
 config :logger, level: :info
 
 # Configure the endpoint for HTTPS with Let's Encrypt
-config :elixir_gateway, ElixirGatewayWeb.Endpoint,
+config :elixirgateway, ElixirGatewayWeb.Endpoint,
   # Enable HTTPS with SiteEncrypt for automatic SSL certificates
   https: [
     port: 4001,
@@ -27,7 +27,7 @@ config :site_encrypt, ElixirGateway.SiteEncrypt,
   endpoint: ElixirGatewayWeb.Endpoint
 
 # Certificate storage configuration
-config :elixir_gateway,
+config :elixirgateway,
   cert_db_folder: System.get_env("CERT_DB_FOLDER", "/etc/elixirgateway/certs")
 
 # Runtime production configuration, including reading

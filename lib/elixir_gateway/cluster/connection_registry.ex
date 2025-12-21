@@ -13,7 +13,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   use GenServer
   require Logger
 
-  @registry_scope :elixir_gateway_connections
+  @registry_scope :elixirgateway_connections
 
   ## Client API
 
@@ -136,7 +136,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   ## Private Functions
 
   defp clustering_enabled? do
-    config = Application.get_env(:elixir_gateway, :cluster, [])
+    config = Application.get_env(:elixirgateway, :cluster, [])
     Keyword.get(config, :enabled, false)
   end
 
