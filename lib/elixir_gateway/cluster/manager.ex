@@ -19,7 +19,6 @@ defmodule ElixirGateway.Cluster.Manager do
   automatically when its IP changes, without requiring the cloud node to
   track the changing IP address.
   """
-  alias :partisan_peer_service, as: PartisanPeerService
   alias ElixirGateway.Cluster.IPDetection
 
   use GenServer
@@ -140,6 +139,21 @@ defmodule ElixirGateway.Cluster.Manager do
 
   ## Private Functions
 
+  defp parse_ip_address(host) do
+    # Try to parse as IP address, otherwise resolve via DNS
+    case :inet.parse_address(to_charlist(host)) do
+      {:ok, ip_tuple} ->
+        ip_tuple
+
+      {:error, _} ->
+        # Not a valid IP, try DNS lookup
+        case :inet.getaddr(to_charlist(host), :inet) do
+          {:ok, ip_tuple} -> ip_tuple
+          {:error, _} -> to_charlist(host)  # Fallback to charlist
+        end
+    end
+  end
+
   defp configure_partisan(node_name, shared_secret, listen_port) do
     # 1. Identity - Use node_name@ip format
     my_ip = get_node_ip()
@@ -152,18 +166,22 @@ defmodule ElixirGateway.Cluster.Manager do
     Application.put_env(
       :partisan,
       :peer_service_manager,
-      PartisanPeerService.Manager.DefaultPeerServiceManager
+      :partisan_pluggable_peer_service_manager
     )
 
     # 3. Networking & Storage
     # Use Ets if you want clean slates, or omit this for disk persistence (default)
+    # Listen on all interfaces (0.0.0.0) to accept connections from any network
     Application.put_env(:partisan, :listen_addrs, [%{ip: {0, 0, 0, 0}, port: listen_port}])
     Application.put_env(:partisan, :storage_backend, Partisan.Storage.Backend.Ets)
     # Application.put_env(:partisan, :data_dir, "/var/lib/partisan_data")
 
     # 4. Channels
+    # Must match the channels specified in connect_to_peer/2
     Application.put_env(:partisan, :channels, %{
-      default: %{monotonic: true, parallelism: 1}
+      undefined: %{monotonic: false, parallelism: 1, compression: false},
+      default: %{monotonic: true, parallelism: 1},
+      partisan_membership: %{monotonic: false, parallelism: 1, compression: true}
     })
 
     # 5. TLS with Shared Secret (No Certs)
@@ -190,27 +208,31 @@ defmodule ElixirGateway.Cluster.Manager do
 
     # Shared options for both Client and Server
     psk_options = [
-      {:psk_identity, "partisan_cluster"},
+      {:psk_identity, ~c"partisan_cluster"},
       {:user_lookup_fun, lookup_fun},
-      # Support TLS 1.3 and 1.2
-      {:versions, [:"tlsv1.3", :"tlsv1.2"]},
-      # PSK ciphersuites for both TLS versions
+      # Disable certificate verification for PSK-only auth
+      {:verify, :verify_none},
+      # Support TLS 1.2 only (TLS 1.3 PSK has different requirements)
+      {:versions, [:"tlsv1.2"]},
+      # PSK ciphersuites for TLS 1.2 (tuple format required)
       {:ciphers, [
-        # TLS 1.3 PSK cipher (preferred)
-        :"TLS_AES_256_GCM_SHA384",
-        :"TLS_AES_128_GCM_SHA256",
-        # TLS 1.2 PSK fallback
-        :psk_with_aes_128_cbc_sha,
-        :psk_with_aes_256_cbc_sha
+        {:psk, :aes_128_cbc, :sha},
+        {:psk, :aes_256_cbc, :sha}
       ]}
     ]
 
     Application.put_env(:partisan, :tls_server_options, psk_options)
     Application.put_env(:partisan, :tls_client_options, psk_options)
 
+    # Configure Partisan logging level
+    Application.put_env(:partisan, :log_level, :info)
+
     # 6. Start Application
     case Application.ensure_all_started(:partisan) do
       {:ok, _} ->
+        # Set Partisan modules to info level
+        :logger.set_application_level(:partisan, :info)
+
         Logger.info(
           "Partisan 5.0.3 started as #{full_node_name} on port #{listen_port} (PSK Enabled)"
         )
@@ -223,22 +245,29 @@ defmodule ElixirGateway.Cluster.Manager do
   end
 
   defp connect_to_peer(peer_address, _config) do
-    # Parse peer address (e.g., "gateway-b.example.com:9100" or "192.168.1.10:9100")
+    # Parse peer address:
+    # Format 1: "node_name@host:port" (explicit node name)
+    # Format 2: "host:port" (derive node name from host)
     case parse_peer_address(peer_address) do
-      {:ok, host, port} ->
-        # Extract node name from hostname (first part before .)
-        # For "gateway-b.example.com" -> "gateway-b"
-        # For "192.168.1.10" -> "192.168.1.10" (IP as-is)
-        peer_node_name = extract_node_name(host)
+      {:ok, node_name, host, port} ->
+        # Parse IP address (convert "127.0.0.1" to {127, 0, 0, 1})
+        ip_tuple = parse_ip_address(host)
 
-        # Create Partisan node specification using name@host format
+        # Create Partisan node specification with channels
         peer_node = %{
-          name: String.to_atom("#{peer_node_name}@#{host}"),
-          listen_addrs: [%{ip: to_charlist(host), port: port}]
+          name: String.to_atom("#{node_name}@#{host}"),
+          listen_addrs: [%{ip: ip_tuple, port: port}],
+          channels: %{
+            undefined: %{monotonic: false, parallelism: 1, compression: false},
+            default: %{monotonic: true, parallelism: 1},
+            partisan_membership: %{monotonic: false, parallelism: 1, compression: true}
+          }
         }
 
-        # Attempt to join the peer
-        case PartisanPeerService.join(peer_node) do
+        # Attempt to join the peer using Partisan manager
+        manager = Application.get_env(:partisan, :peer_service_manager)
+
+        case manager.join(peer_node) do
           :ok ->
             Logger.info("Successfully connected to peer: #{peer_address}")
             :ok
@@ -255,32 +284,67 @@ defmodule ElixirGateway.Cluster.Manager do
   end
 
   defp parse_peer_address(address) do
-    case String.split(address, ":") do
-      [host, port_str] ->
-        case Integer.parse(port_str) do
-          {port, ""} -> {:ok, host, port}
-          _ -> {:error, "Invalid port: #{port_str}"}
+    # Check if format is "node_name@host:port"
+    case String.split(address, "@") do
+      [node_name, host_port] ->
+        # Format: node_name@host:port
+        case String.split(host_port, ":") do
+          [host, port_str] ->
+            case Integer.parse(port_str) do
+              {port, ""} -> {:ok, node_name, host, port}
+              _ -> {:error, "Invalid port number"}
+            end
+
+          _ ->
+            {:error, "Invalid format after @, expected host:port"}
         end
 
-      _ ->
-        {:error, "Invalid format, expected host:port"}
+      [host_port] ->
+        # Format: host:port (derive node name from host)
+        case String.split(host_port, ":") do
+          [host, port_str] ->
+            case Integer.parse(port_str) do
+              {port, ""} ->
+                node_name = extract_node_name(host)
+                {:ok, node_name, host, port}
+
+              _ ->
+                {:error, "Invalid port number"}
+            end
+
+          _ ->
+            {:error, "Invalid format, expected host:port or node@host:port"}
+        end
     end
   end
 
   defp get_partisan_peers do
-    # Get the list of cluster members
-    case PartisanPeerService.members() do
-      {:ok, members} ->
-        # Get our own identity to filter it out
-        myself = :partisan.node_spec()
+    # Get the list of cluster members using Partisan's peer service API
+    try do
+      # Partisan 5.0.3 API - use partisan_peer_service module
+      manager = Application.get_env(:partisan, :peer_service_manager)
 
-        # Filter out self. Note: 'members' usually returns a list of names (atoms).
-        # 'myself' returns a full spec map. We compare the name field.
-        members
-        |> Enum.reject(fn member_name -> member_name == myself.name end)
+      case manager.members() do
+        {:ok, members} when is_list(members) ->
+          # Get our own node name
+          myself = Application.get_env(:partisan, :name)
 
-      {:error, reason} ->
-        Logger.warning("Failed to get Partisan members: #{inspect(reason)}")
+          # In Partisan 5, members() returns {:ok, [list of node atoms]}
+          # Filter out self from the list
+          members
+          |> Enum.reject(fn member -> member == myself end)
+
+        {:error, reason} ->
+          Logger.warning("Failed to get Partisan members: #{inspect(reason)}")
+          []
+
+        other ->
+          Logger.warning("manager.members() returned unexpected format: #{inspect(other)}")
+          []
+      end
+    catch
+      kind, reason ->
+        Logger.warning("Partisan members call failed: #{inspect({kind, reason})}")
         []
     end
   end
@@ -289,21 +353,22 @@ defmodule ElixirGateway.Cluster.Manager do
     connected = get_partisan_peers()
 
     Enum.reduce(configured_peers, %{}, fn peer, acc ->
-      # Check if this peer is in the connected list
+      # Parse peer to get node name
       status =
-        if Enum.any?(connected, fn connected_peer ->
-             # Match by hostname from the peer address
-             case parse_peer_address(peer) do
-               {:ok, host, _port} ->
-                 String.contains?(to_string(connected_peer), host)
+        case parse_peer_address(peer) do
+          {:ok, node_name, host, _port} ->
+            # Build expected node atom
+            expected_node = String.to_atom("#{node_name}@#{host}")
 
-               _ ->
-                 false
-             end
-           end) do
-          :healthy
-        else
-          :disconnected
+            # Check if this node is in the connected list
+            if Enum.member?(connected, expected_node) do
+              :healthy
+            else
+              :disconnected
+            end
+
+          _ ->
+            :disconnected
         end
 
       Map.put(acc, peer, status)

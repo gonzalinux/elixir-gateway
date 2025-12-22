@@ -14,7 +14,18 @@ setup: ## Install dependencies and setup project
 	mix setup
 
 run: ## Start the Phoenix server
-	mix phx.server
+	@if [ -f .env ]; then \
+		export $$(grep -vE '^\s*#|^\s*$$' .env | sed 's/#.*$$//' | xargs) && mix phx.server; \
+	else \
+		mix phx.server; \
+	fi
+
+run2: ## Start the Phoenix server with custom configuration
+	@if [ -f .env2 ]; then \
+		export $$(grep -vE '^\s*#|^\s*$$' .env2 | sed 's/#.*$$//' | xargs) && mix phx.server; \
+	else \
+		mix phx.server; \
+	fi
 
 install-certbot: ## Install certbot for SSL certificate management
 	@echo "Installing certbot via snap..."

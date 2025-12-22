@@ -8,3 +8,5 @@
 .claude
 /elixir_ls
 erl_crash.dump
+.env
+.env2

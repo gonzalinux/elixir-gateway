@@ -93,32 +93,25 @@ SITE_ENCRYPT_DB="priv/certs"
 SITE_ENCRYPT_DB="/etc/elixirgateway/certs"
 ```
 
-### CERT_DB_FOLDER
-**Type:** String (file path)
+### ACME_SERVER_PORT
+**Type:** Integer
 **Required:** No
-**Default:** "/etc/elixirgateway/certs"
-**Used in:** `config/prod.exs:31`
+**Default:** 4005
+**Used in:** `lib/elixir_gateway_web/endpoint.ex:26`
 
-Alternative certificate storage path used in production configuration.
+Port for SiteEncrypt's internal ACME server in development and test environments. This is the server that issues self-signed certificates locally, not the HTTP listener port.
 
 ```bash
-CERT_DB_FOLDER="/opt/ssl/certs"
+# Default internal ACME server port
+ACME_SERVER_PORT="4005"
+
+# Custom port (useful to avoid conflicts in CI)
+ACME_SERVER_PORT="5005"
 ```
+
+**Note:** This only applies to dev and test environments. Production uses Let's Encrypt's external ACME servers.
 
 ## Application Configuration
-
-### PHX_SERVER
-**Type:** Boolean ("true" or any other value)
-**Required:** No
-**Default:** Not set
-**Used in:** `config/runtime.exs:19`
-
-Starts the Phoenix server automatically when set to "true". Useful for releases and containers.
-
-```bash
-# Auto-start server (recommended for production)
-PHX_SERVER="true"
-```
 
 ### PHX_HOST
 **Type:** String (hostname or IP)
@@ -139,20 +132,42 @@ PHX_HOST="192.168.1.10"
 PHX_HOST="127.0.0.1"
 ```
 
-### PORT
+### HTTP_PORT
 **Type:** Integer
 **Required:** No
-**Default:** 4442
-**Used in:** `config/runtime.exs:37`
+**Default:** 4004 (dev), 4000 (prod)
+**Used in:** `config/runtime.exs:20`, `config/dev.exs:13`, `config/prod.exs`
 
-HTTP port for the gateway to listen on.
+HTTP port for ACME challenges (Let's Encrypt) and optional HTTP access. Can be overridden in all environments (dev, test, prod).
 
 ```bash
-# Default production port
-PORT="4442"
+# Override in development
+HTTP_PORT="8080" mix phx.server
 
-# Custom port
-PORT="8080"
+# Production default
+HTTP_PORT="4000"
+
+# Use standard HTTP port (requires root/capabilities)
+HTTP_PORT="80"
+```
+
+### HTTPS_PORT
+**Type:** Integer
+**Required:** No
+**Default:** 4003 (dev), 4001 (prod)
+**Used in:** `config/runtime.exs:28`, `config/dev.exs:17`, `config/prod.exs`
+
+HTTPS port for secure gateway traffic. Can be overridden in all environments (dev, test, prod).
+
+```bash
+# Override in development
+HTTPS_PORT="8443" mix phx.server
+
+# Production default
+HTTPS_PORT="4001"
+
+# Use standard HTTPS port (requires root/capabilities)
+HTTPS_PORT="443"
 ```
 
 ### DNS_CLUSTER_QUERY
@@ -279,6 +294,49 @@ CLUSTER_PEERS=""
 - Cloud node: `CLUSTER_PEERS=""` (accepts connections only)
 - Home node: `CLUSTER_PEERS="cloud.example.com:9100"` (initiates connection)
 
+### IS_PRIMARY
+**Type:** Boolean ("true" or "false")
+**Required:** No
+**Default:** Auto-detected from CLUSTER_PEERS
+**Used in:** `lib/elixir_gateway/cluster/certificate_manager.ex:229`
+
+Explicitly designate this node as primary (generates SSL certificates) or secondary (receives certificates).
+
+```bash
+# Force as primary (generates Let's Encrypt certificates)
+IS_PRIMARY="true"
+
+# Force as secondary (receives certificates from primary)
+IS_PRIMARY="false"
+
+# Auto-detect (recommended)
+# IS_PRIMARY=""  # or omit entirely
+```
+
+**Auto-detection Logic:**
+- Empty `CLUSTER_PEERS` → Primary
+- Non-empty `CLUSTER_PEERS` → Secondary
+
+**Use Case:** In a distributed cluster with the same DNS/domain on both nodes, only the primary should contact Let's Encrypt to avoid duplicate ACME challenges and rate limits. The secondary receives certificates via encrypted Partisan RPC.
+
+### CERT_SYNC_ENABLED
+**Type:** Boolean ("true" or "false")
+**Required:** No
+**Default:** "true"
+**Used in:** `lib/elixir_gateway/cluster/certificate_manager.ex:99`
+
+Enable or disable SSL certificate synchronization between cluster nodes.
+
+```bash
+# Enable certificate sync (default when clustering enabled)
+CERT_SYNC_ENABLED="true"
+
+# Disable certificate sync
+CERT_SYNC_ENABLED="false"
+```
+
+**Note:** Certificate sync is automatically enabled when clustering is enabled. Only disable this if you're managing certificates separately on each node.
+
 ### DNS_FAILOVER_ENABLED
 **Type:** Boolean ("true" or "false")
 **Required:** No
@@ -355,12 +413,12 @@ Logging configuration is managed through `config/config.exs` and is currently ha
 
 ## Docker Environment
 
-When running in Docker, these variables arwe typically set in:
+When running in Docker, these variables are typically set in:
 
 ```dockerfile
 # Set in Dockerfile
-ENV PHX_SERVER=true
-ENV PORT=4000
+ENV HTTP_PORT=4000
+ENV HTTPS_PORT=4001
 ENV MIX_ENV=prod
 
 # Set at runtime
@@ -388,8 +446,8 @@ kind: ConfigMap
 metadata:
   name: elixirgateway-config
 data:
-  PHX_SERVER: "true"
-  PORT: "4000"
+  HTTP_PORT: "4000"
+  HTTPS_PORT: "4001"
   LETSENCRYPT_DOMAINS: "api.yourdomain.com"
   LETSENCRYPT_STAGING: "false"
   SITE_ENCRYPT_DB: "/etc/ssl/certs"
@@ -415,7 +473,6 @@ chown elixirgateway:elixirgateway /etc/elixirgateway/certs
 
 # Or use environment variable to change location
 export SITE_ENCRYPT_DB="/opt/certs"
-export CERT_DB_FOLDER="/opt/certs"
 ```
 
 ### Port Conflicts
@@ -423,24 +480,25 @@ export CERT_DB_FOLDER="/opt/certs"
 Check for port conflicts before starting:
 
 ```bash
-# Check if port is in use
-netstat -tulpn | grep :4442
+# Check if ports are in use
+netstat -tulpn | grep :4000   # HTTP
+netstat -tulpn | grep :4001   # HTTPS
 
-# Or use a different port
-export PORT=8080
+# Or use different ports
+export HTTP_PORT=8080
+export HTTPS_PORT=8443
 ```
 
 ## Best Practices
 
 1. **Never commit secrets** to version control (SECRET_KEY_BASE, CLUSTER_SECRET, DDNS passwords)
 2. **Use staging environment** for Let's Encrypt testing
-3. **Set PHX_SERVER=true** in production deployments
-4. **Use persistent storage** for SSL certificates
-5. **Monitor certificate expiration** (Let's Encrypt auto-renews)
-6. **Generate strong secrets** using provided tools (mix tasks, openssl)
-7. **Use asymmetric clustering** for cloud + home setups (cloud accepts, home initiates)
-8. **Set NODE_IP explicitly** on cloud servers with static IPs
-9. **Keep firewall ports open** for cluster communication (default: 9100)
+3. **Use persistent storage** for SSL certificates
+4. **Monitor certificate expiration** (Let's Encrypt auto-renews)
+5. **Generate strong secrets** using provided tools (mix tasks, openssl)
+6. **Use asymmetric clustering** for cloud + home setups (cloud accepts, home initiates)
+7. **Set NODE_IP explicitly** on cloud servers with static IPs
+8. **Keep firewall ports open** for cluster communication (default: 9100)
 
 ## See Also
 

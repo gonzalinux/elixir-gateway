@@ -39,12 +39,24 @@ defmodule ElixirGateway.Cluster.Supervisor do
         # Connection registry for distributed sticky sessions
         {ElixirGateway.Cluster.ConnectionRegistry, []},
 
+        # Certificate synchronization manager
+        certificate_manager_child(config),
+
         # DNS failover monitor (only if DNS failover is enabled)
         dns_failover_child(config)
       ]
       |> Enum.reject(&is_nil/1)
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp certificate_manager_child(config) do
+    cert_sync_config = Keyword.get(config, :cert_sync, [])
+
+    # Default enabled if clustering is enabled
+    if Keyword.get(cert_sync_config, :enabled, true) do
+      {ElixirGateway.Cluster.CertificateManager, []}
+    end
   end
 
   defp dns_failover_child(config) do

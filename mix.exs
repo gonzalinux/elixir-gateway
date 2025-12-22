@@ -44,7 +44,7 @@ defmodule ElixirGateway.MixProject do
       {:hammer, "~> 6.1"},
       {:finch, "~> 0.19"},
       {:prom_ex, "~> 1.9"},
-      {:site_encrypt, "~> 0.6"},
+      {:site_encrypt, "~> 0.7"},
       {:gun, "~> 2.0"},
       {:partisan, "~> 5.0.3"},
       {:syn, "~> 3.3"},

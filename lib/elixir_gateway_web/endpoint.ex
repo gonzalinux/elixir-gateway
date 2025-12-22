@@ -22,12 +22,47 @@ defmodule ElixirGatewayWeb.Endpoint do
       # set OS env var CERT_MODE to "staging" or "production" on staging/production hosts
       directory_url:
         case Application.get_env(:elixirgateway, :env) do
-          :dev -> {:internal, port: 4002}
-          :test -> {:internal, port: 4002}
-          :stage -> "https://acme-staging-v02.api.letsencrypt.org/directory"
-          :prod -> "https://acme-v02.api.letsencrypt.org/directory"
+          :dev ->
+            acme_port = System.get_env("ACME_SERVER_PORT", "4005") |> String.to_integer()
+            {:internal, port: acme_port}
+
+          :test ->
+            acme_port = System.get_env("ACME_SERVER_PORT", "4005") |> String.to_integer()
+            {:internal, port: acme_port}
+
+          :stage ->
+            "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+          :prod ->
+            "https://acme-v02.api.letsencrypt.org/directory"
         end
     )
+  end
+
+  @impl SiteEncrypt
+  def handle_new_cert do
+    # Get the first domain from the certification config
+    cert_config = certification()
+    domain = hd(cert_config.domains)
+
+    # Notify certificate manager (no-op if clustering disabled)
+    if cluster_cert_sync_enabled?() do
+      ElixirGateway.Cluster.CertificateManager.on_certificates_generated(domain)
+    end
+
+    :ok
+  end
+
+  defp cluster_cert_sync_enabled? do
+    cluster_config = Application.get_env(:elixirgateway, :cluster, [])
+    clustering_enabled = Keyword.get(cluster_config, :enabled, false)
+
+    if clustering_enabled do
+      cert_sync_config = Keyword.get(cluster_config, :cert_sync, [])
+      Keyword.get(cert_sync_config, :enabled, true)
+    else
+      false
+    end
   end
 
   # The session will be stored in the cookie and signed,

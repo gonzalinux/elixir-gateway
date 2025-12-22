@@ -47,6 +47,100 @@ openssl rand -hex 32
     Backend A                       Backend B
 ```
 
+## Certificate Management
+
+When running a distributed cluster with the same domain on both nodes, only the **primary** node should generate Let's Encrypt certificates. The **secondary** node receives certificates from the primary via encrypted Partisan RPC.
+
+### Role Determination
+
+**Auto-detection** (recommended):
+- Empty `CLUSTER_PEERS` → Primary (generates certificates)
+- Non-empty `CLUSTER_PEERS` → Secondary (receives certificates)
+
+**Explicit override** (optional):
+```bash
+IS_PRIMARY="true"   # Forces node to be primary
+IS_PRIMARY="false"  # Forces node to be secondary
+```
+
+### Certificate Sync Flow
+
+```
+Primary (Cloud)                Secondary (Home)
+      │                              │
+      │ 1. SiteEncrypt generates     │
+      │    Let's Encrypt cert        │
+      │                              │
+      │ 2. CertificateManager        │
+      │    reads cert files          │
+      │                              │
+      │ 3. Computes SHA-256          │
+      │    checksum                  │
+      │                              │
+      │ 4. Partisan RPC ────────────►│ 5. Receives bundle
+      │                              │
+      │                              │ 6. Validates checksum
+      │                              │
+      │                              │ 7. Writes to disk
+      │                              │    (0o600 permissions)
+      │                              │
+      │                              │ 8. Reloads SSL cache
+      │                              │
+      │ 9. ACK ◄────────────────────│
+```
+
+### Configuration
+
+Certificate sync is **enabled by default** when clustering is enabled:
+
+```elixir
+config :elixirgateway, :cluster,
+  enabled: true,
+  cert_sync: [
+    enabled: true,        # Default: true
+    retry_delay: 5_000,   # Retry delay for failed syncs (ms)
+    max_retries: 3,       # Max sync retry attempts
+    rpc_timeout: 30_000   # RPC call timeout (ms)
+  ]
+```
+
+### Primary Node Setup (Cloud)
+
+```bash
+# .env
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<shared-secret>
+NODE_NAME=gateway-cloud
+CLUSTER_PEERS=                    # Empty = auto-detected as primary
+
+# Let's Encrypt configuration (primary generates certs)
+LETSENCRYPT_DOMAINS=example.com,api.example.com
+LETSENCRYPT_EMAIL=admin@example.com
+SITE_ENCRYPT_DB=/etc/elixirgateway/certs
+```
+
+### Secondary Node Setup (Home)
+
+```bash
+# .env
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<same-shared-secret>
+NODE_NAME=gateway-home
+CLUSTER_PEERS=gateway-cloud.example.com:9100  # Non-empty = auto-detected as secondary
+
+# Let's Encrypt NOT configured (receives from primary)
+SITE_ENCRYPT_DB=/etc/elixirgateway/certs
+```
+
+### Benefits
+
+- **No duplicate ACME challenges**: Only primary contacts Let's Encrypt
+- **No rate limits**: Avoid hitting Let's Encrypt's rate limits
+- **Seamless failover**: Secondary already has valid certificates
+- **Automatic sync**: Happens automatically on cert generation/renewal
+- **Secure transport**: Certificates transmitted over encrypted Partisan connection
+- **Integrity validation**: SHA-256 checksums prevent corruption
+
 ## Dependencies
 
 ```elixir
@@ -63,6 +157,7 @@ openssl rand -hex 32
 | `ElixirGateway.Cluster.Supervisor` | Top-level supervisor; no-op if `enabled: false` |
 | `ElixirGateway.Cluster.Manager` | Partisan setup, peer connection, health heartbeats |
 | `ElixirGateway.Cluster.ConnectionRegistry` | Distributed sticky sessions via Syn: `{client_ip, session_id}` → `node` |
+| `ElixirGateway.Cluster.CertificateManager` | SSL certificate synchronization from primary to secondary nodes |
 | `ElixirGateway.Cluster.DNSFailover` | Monitors peer, triggers DDNS update on failure |
 | `ElixirGateway.Cluster.DDNS.Namecheap` | DDNS client (same protocol as ddclient) |
 | `ElixirGateway.Cluster.Secret` | Optional auto-generation if secret file missing |

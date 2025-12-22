@@ -4,6 +4,35 @@ ElixirGateway supports distributed clustering for high availability. Multiple ga
 
 **Opt-in feature - disabled by default.**
 
+## Two Clustering Approaches
+
+ElixirGateway supports two different clustering systems:
+
+### Partisan Clustering (CLUSTER_ENABLED) - Recommended for Most Use Cases
+
+**Use when:** Cloud + home deployments, different networks, shared domains
+**Technology:** Partisan with encrypted PSK TLS
+**Benefits:** Works across NAT/firewalls, automatic certificate sync, DNS failover
+
+```bash
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<64-char-hex>
+NODE_NAME=gateway-a
+CLUSTER_PEERS=gateway-b.example.com:9100
+```
+
+### DNS Clustering (DNS_CLUSTER_QUERY) - For Kubernetes/Swarm Only
+
+**Use when:** All nodes in same network (Kubernetes, Docker Swarm)
+**Technology:** Erlang distribution with DNS discovery
+**Limitations:** No encryption, doesn't work across NAT, no certificate sync
+
+```bash
+DNS_CLUSTER_QUERY=elixirgateway.default.svc.cluster.local
+```
+
+**Important:** Don't use both at the same time. For cloud + home with shared domains, use Partisan clustering.
+
 ## Architecture
 
 ```

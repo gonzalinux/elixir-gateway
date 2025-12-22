@@ -18,9 +18,6 @@ export LETSENCRYPT_STAGING="true"
 
 # Optional: Organization name (default: "ElixirGateway API Gateway")
 export LETSENCRYPT_ORGANIZATION="Your Company Name"
-
-# Optional: Certificate storage path (default: /etc/elixir_gateway/certs)
-export CERT_DB_FOLDER="/opt/elixir_gateway/certs"
 ```
 
 ### 2. **DNS Configuration**
@@ -192,7 +189,6 @@ User=elixir_gateway
 Group=elixir_gateway
 Environment=LETSENCRYPT_DOMAINS=api.yourdomain.com,service1.yourdomain.com
 Environment=LETSENCRYPT_EMAIL=admin@yourdomain.com
-Environment=CERT_DB_FOLDER=/etc/elixir_gateway/certs
 ExecStart=/opt/elixir_gateway/bin/elixir_gateway start
 Restart=always
 RestartSec=5
@@ -209,7 +205,6 @@ VOLUME ["/etc/elixir_gateway/certs"]
 
 ENV LETSENCRYPT_DOMAINS=""
 ENV LETSENCRYPT_EMAIL=""
-ENV CERT_DB_FOLDER="/etc/elixir_gateway/certs"
 
 EXPOSE 80 443
 ```
