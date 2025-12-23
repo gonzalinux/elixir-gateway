@@ -277,7 +277,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
       }
 
       # Terminate should return connection to pool
-      result = ElixirGatewayWeb.GunWebSocketHandler.terminate(:normal, state)
+      result = ElixirGatewayWeb.EnhancedGunWebSocketHandler.terminate(:normal, state)
       assert result == :ok
 
       # Note: In a real test, we'd verify the pool received the connection

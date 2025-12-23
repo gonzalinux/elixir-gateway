@@ -35,18 +35,23 @@ config :elixir_gateway, :gateway,
   }
 ```
 
-### 2. Connection Handler (`GunWebSocketHandler`)
+### 2. Connection Handler (`EnhancedGunWebSocketHandler`)
 
-The actual WebSocket proxy implementation that manages the connection lifecycle and message forwarding.
+The actual WebSocket proxy implementation that manages the connection lifecycle and message forwarding with advanced features.
 
-**Location**: `lib/elixirgateway_web/handlers/gun_websocket_handler.ex`
+**Location**: `lib/elixirgateway_web/handlers/enhanced_gun_websocket_handler.ex`
 
 **Key Features**:
 - Implements the `WebSock` behavior for Phoenix compatibility
 - Uses Gun HTTP client for high-performance WebSocket connections
+- Connection pooling via `WebSocketConnectionPool` for improved resource management
+- Automatic reconnection with exponential backoff and jitter
+- Message queuing during connection interruptions (configurable queue size)
 - Provides bidirectional message forwarding
-- Handles all WebSocket frame types (text, binary, ping, pong)
+- Handles all WebSocket frame types (text, binary, ping, pong, close)
 - Manages connection timeouts and error recovery
+- Periodic ping/pong for connection health monitoring
+- Configurable upgrade timeouts, reconnection attempts, and delays
 
 ## Connection Flow
 
