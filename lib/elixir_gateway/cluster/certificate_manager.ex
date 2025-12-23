@@ -298,19 +298,51 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   defp get_connected_peers do
     if clustering_enabled?() do
-      # Check if ClusterManager is running
-      case Process.whereis(ClusterManager) do
-        nil ->
-          Logger.warning("ClusterManager not running, no peers available")
-          {:ok, []}
-
-        _pid ->
-          peers = ClusterManager.connected_peers()
-          {:ok, peers}
-      end
+      # Check if ClusterManager is running and retry with backoff if needed
+      get_connected_peers_with_retry(3, 100)
     else
       {:error, :clustering_disabled}
     end
+  end
+
+  defp get_connected_peers_with_retry(retries_left, backoff_ms) when retries_left > 0 do
+    case Process.whereis(ClusterManager) do
+      nil ->
+        if retries_left > 1 do
+          Logger.debug("ClusterManager not running yet, retrying in #{backoff_ms}ms (#{retries_left - 1} retries left)")
+          Process.sleep(backoff_ms)
+          get_connected_peers_with_retry(retries_left - 1, backoff_ms * 2)
+        else
+          Logger.warning("ClusterManager not running, no peers available")
+          {:ok, []}
+        end
+
+      _pid ->
+        try do
+          peers = ClusterManager.connected_peers()
+          {:ok, peers}
+        catch
+          :exit, {:noproc, _} ->
+            # ClusterManager died between whereis check and call
+            if retries_left > 1 do
+              Logger.debug("ClusterManager not available, retrying in #{backoff_ms}ms")
+              Process.sleep(backoff_ms)
+              get_connected_peers_with_retry(retries_left - 1, backoff_ms * 2)
+            else
+              Logger.warning("ClusterManager unavailable after retries")
+              {:ok, []}
+            end
+
+          :exit, {:timeout, _} ->
+            Logger.warning("Timeout calling ClusterManager.connected_peers()")
+            {:ok, []}
+        end
+    end
+  end
+
+  defp get_connected_peers_with_retry(0, _backoff_ms) do
+    Logger.warning("Failed to get connected peers after all retries")
+    {:ok, []}
   end
 
   defp broadcast_to_peer(peer_node, cert_bundle) do

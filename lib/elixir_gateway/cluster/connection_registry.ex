@@ -175,7 +175,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
         ws_key
 
       # Session cookie (Phoenix default)
-      session = conn.cookies["_elixir_gateway_key"] ->
+      session = conn.cookies["_elixirgateway_key"] ->
         session
 
       # Custom session header

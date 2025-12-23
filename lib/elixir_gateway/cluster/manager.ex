@@ -200,6 +200,12 @@ defmodule ElixirGateway.Cluster.Manager do
           end
       end
 
+    # Validate secret length (minimum 32 bytes / 256 bits for security)
+    if byte_size(psk_secret) < 32 do
+      Logger.error("Cluster secret is too short: #{byte_size(psk_secret)} bytes (minimum 32 bytes required)")
+      raise ArgumentError, "Cluster secret must be at least 32 bytes (64 hex characters)"
+    end
+
     # Lookup function required by Erlang's :ssl for PSK
     # It verifies the identity and returns the secret key
     lookup_fun = {fn :psk, _id, _user_data -> {:ok, psk_secret} end, []}
@@ -400,21 +406,34 @@ defmodule ElixirGateway.Cluster.Manager do
             ip
 
           {:error, reason} ->
-            Logger.warning("Failed to detect public IP (#{inspect(reason)}), falling back to local IP")
+            Logger.warning("Failed to detect public IP (#{inspect(reason)}), trying local IP")
 
             # Fallback to local IP detection
             case IPDetection.get_local_ip() do
               {:ok, ip} ->
                 ip
 
-              {:error, _} ->
-                Logger.error("Could not detect any IP address, using 127.0.0.1")
-                "127.0.0.1"
+              {:error, local_reason} ->
+                Logger.error("Failed to auto-detect IP address. Public IP: #{inspect(reason)}, Local IP: #{inspect(local_reason)}")
+                raise RuntimeError, """
+                Could not detect node IP address for clustering.
+
+                Please explicitly set NODE_IP in your environment:
+                  export NODE_IP="your.server.ip.address"
+
+                For local testing on the same machine, use:
+                  export NODE_IP="127.0.0.1"
+
+                For production, use your server's public IP address.
+                """
             end
         end
 
-      ip when is_binary(ip) ->
+      ip when is_binary(ip) and ip != "" ->
         ip
+
+      _ ->
+        raise ArgumentError, "NODE_IP cannot be empty. Please set a valid IP address."
     end
   end
 
