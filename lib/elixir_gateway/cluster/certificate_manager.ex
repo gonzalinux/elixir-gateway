@@ -19,6 +19,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   require Logger
 
   alias ElixirGateway.Cluster.Manager, as: ClusterManager
+  alias ElixirGateway.Utils
 
   @typedoc "Certificate bundle with all required files"
   @type cert_bundle :: %{
@@ -31,7 +32,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
         }
 
   @rpc_timeout 30_000
-  @sync_retry_delay 5_000
+  @sync_retry_base_delay 1_000
   @max_sync_retries 3
 
   defstruct [
@@ -126,8 +127,9 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
         {:error, reason} ->
           Logger.error("Failed to broadcast certificates: #{inspect(reason)}")
-          # Schedule retry
-          Process.send_after(self(), {:retry_broadcast, domain}, @sync_retry_delay)
+          # Schedule retry with exponential backoff
+          backoff_ms = calculate_backoff(state.sync_failures)
+          Process.send_after(self(), {:retry_broadcast, domain}, backoff_ms)
           {:noreply, %{state | sync_failures: state.sync_failures + 1}}
       end
     else
@@ -193,7 +195,8 @@ defmodule ElixirGateway.Cluster.CertificateManager do
           {:noreply, %{state | sync_failures: 0}}
 
         {:error, _reason} ->
-          Process.send_after(self(), {:retry_broadcast, domain}, @sync_retry_delay)
+          backoff_ms = calculate_backoff(state.sync_failures)
+          Process.send_after(self(), {:retry_broadcast, domain}, backoff_ms)
           {:noreply, %{state | sync_failures: state.sync_failures + 1}}
       end
     else
@@ -203,6 +206,10 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   end
 
   ## Private Functions
+
+  defp calculate_backoff(attempt) do
+    Utils.exponential_backoff(attempt, base_delay: @sync_retry_base_delay)
+  end
 
   defp determine_role(cluster_config) do
     # 1. Check explicit override
@@ -299,48 +306,36 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   defp get_connected_peers do
     if clustering_enabled?() do
       # Check if ClusterManager is running and retry with backoff if needed
-      get_connected_peers_with_retry(3, 100)
+      get_connected_peers_with_retry(0, 3)
     else
       {:error, :clustering_disabled}
     end
   end
 
-  defp get_connected_peers_with_retry(retries_left, backoff_ms) when retries_left > 0 do
-    case Process.whereis(ClusterManager) do
-      nil ->
-        if retries_left > 1 do
-          Logger.debug("ClusterManager not running yet, retrying in #{backoff_ms}ms (#{retries_left - 1} retries left)")
+  defp get_connected_peers_with_retry(attempt, max_attempts) when attempt < max_attempts do
+    try do
+      peers = ClusterManager.connected_peers()
+      {:ok, peers}
+    catch
+      :exit, {:noproc, _} ->
+        # ClusterManager not running
+        if attempt + 1 < max_attempts do
+          backoff_ms = Utils.exponential_backoff(attempt, base_delay: 100, jitter: :none)
+          Logger.debug("ClusterManager not available, retrying in #{backoff_ms}ms (#{max_attempts - attempt - 1} retries left)")
           Process.sleep(backoff_ms)
-          get_connected_peers_with_retry(retries_left - 1, backoff_ms * 2)
+          get_connected_peers_with_retry(attempt + 1, max_attempts)
         else
-          Logger.warning("ClusterManager not running, no peers available")
+          Logger.warning("ClusterManager unavailable after retries")
           {:ok, []}
         end
 
-      _pid ->
-        try do
-          peers = ClusterManager.connected_peers()
-          {:ok, peers}
-        catch
-          :exit, {:noproc, _} ->
-            # ClusterManager died between whereis check and call
-            if retries_left > 1 do
-              Logger.debug("ClusterManager not available, retrying in #{backoff_ms}ms")
-              Process.sleep(backoff_ms)
-              get_connected_peers_with_retry(retries_left - 1, backoff_ms * 2)
-            else
-              Logger.warning("ClusterManager unavailable after retries")
-              {:ok, []}
-            end
-
-          :exit, {:timeout, _} ->
-            Logger.warning("Timeout calling ClusterManager.connected_peers()")
-            {:ok, []}
-        end
+      :exit, {:timeout, _} ->
+        Logger.warning("Timeout calling ClusterManager.connected_peers()")
+        {:ok, []}
     end
   end
 
-  defp get_connected_peers_with_retry(0, _backoff_ms) do
+  defp get_connected_peers_with_retry(_attempt, _max_attempts) do
     Logger.warning("Failed to get connected peers after all retries")
     {:ok, []}
   end
