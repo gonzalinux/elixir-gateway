@@ -395,6 +395,7 @@ defmodule ElixirGateway.Cluster.Manager do
       |> Enum.reject(fn node_atom ->
         # Skip if already tracked in configured_peers
         node_str = Atom.to_string(node_atom)
+
         Enum.any?(configured_peers, fn peer ->
           case parse_peer_address(peer) do
             {:ok, node_name, host, _port} ->
