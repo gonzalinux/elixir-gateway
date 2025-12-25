@@ -94,19 +94,29 @@ defmodule ElixirGateway.Cluster.Manager do
     # Configure Partisan
     configure_partisan(node_name, secret, listen_port)
 
+    # Initialize peer health with all configured peers as disconnected
+    initial_peer_health =
+      Enum.reduce(peers, %{}, fn peer, acc ->
+        Map.put(acc, peer, :disconnected)
+      end)
+
+    Logger.info(
+      "Starting cluster manager for node: #{node_name} and peers: #{inspect(initial_peer_health)}"
+    )
+
     state = %__MODULE__{
       config: config,
       node_name: node_name,
       peers: peers,
       heartbeat_interval: heartbeat_interval,
-      peer_health: %{}
+      peer_health: initial_peer_health
     }
 
     # Connect to peers asynchronously
     send(self(), :connect_to_peers)
 
-    # Schedule first heartbeat
-    schedule_heartbeat(heartbeat_interval)
+    # Start peer discovery timer to register callbacks for incoming connections
+    schedule_peer_discovery()
 
     Logger.info("Cluster manager started for node: #{node_name}")
 
@@ -123,22 +133,76 @@ defmodule ElixirGateway.Cluster.Manager do
   end
 
   @impl true
-  def handle_info(:send_heartbeat, state) do
-    # Update peer health based on connections
-    # Note: We check peer health via members() - no need for explicit heartbeat messages
-    # as Partisan handles connection health internally
-    new_peer_health = update_peer_health(state.peers)
+  def handle_info({:peer_up, peer_node, extra}, state) do
+    # Peer connected - update health state immediately
+    peer_str = Atom.to_string(peer_node)
 
-    # Log health state changes
-    log_health_changes(state.peer_health, new_peer_health)
+    # Find the peer in health map and mark as healthy
+    updated_health =
+      Enum.reduce(state.peer_health, state.peer_health, fn {peer_key, _status}, acc ->
+        if String.contains?(peer_key, peer_str) do
+          Logger.info("Peer connected: #{peer_key}  #{extra}")
+          Map.put(acc, peer_key, :healthy)
+        else
+          acc
+        end
+      end)
 
-    # Attempt to reconnect to disconnected peers
-    reconnect_if_needed(state.peers, new_peer_health)
+    {:noreply, %{state | peer_health: updated_health}}
+  end
 
-    # Schedule next heartbeat
-    schedule_heartbeat(state.heartbeat_interval)
+  @impl true
+  def handle_info({:peer_down, peer_node, extra}, state) do
+    # Peer disconnected - update health state immediately
+    peer_str = Atom.to_string(peer_node)
 
-    {:noreply, %{state | peer_health: new_peer_health}}
+    # Find the peer in health map and mark as disconnected
+    updated_health =
+      Enum.reduce(state.peer_health, state.peer_health, fn {peer_key, status}, acc ->
+        if String.contains?(peer_key, peer_str) and status == :healthy do
+          Logger.warning("Peer disconnected: #{peer_key}  #{extra}")
+          Map.put(acc, peer_key, :disconnected)
+        else
+          acc
+        end
+      end)
+
+    {:noreply, %{state | peer_health: updated_health}}
+  end
+
+  @impl true
+  def handle_info(:discover_peers, state) do
+    # Check for new peers that connected to us and register callbacks
+    connected = get_partisan_peers()
+
+    new_state =
+      Enum.reduce(connected, state, fn peer_node, acc_state ->
+        peer_str = Atom.to_string(peer_node)
+
+        # Check if we already have this peer in our health map
+
+        already_tracked =
+          Enum.any?(acc_state.peer_health, fn {peer_key, _} ->
+            String.contains?(peer_key, peer_str)
+          end)
+
+        if already_tracked do
+          acc_state
+        else
+          # New peer connected to us - add to health and register callbacks
+          Logger.info("Discovered new peer: #{peer_str}")
+          register_peer_callbacks(peer_node)
+
+          # Update health map to track this peer
+          updated_health = Map.put(acc_state.peer_health, peer_str, :healthy)
+          %{acc_state | peer_health: updated_health}
+        end
+      end)
+
+    # Schedule next discovery check (every 2 seconds)
+    schedule_peer_discovery()
+
+    {:noreply, new_state}
   end
 
   @impl true
@@ -258,7 +322,12 @@ defmodule ElixirGateway.Cluster.Manager do
          # DHE-PSK with AEAD (forward secrecy + authenticated encryption)
          %{key_exchange: :dhe_psk, cipher: :aes_256_gcm, mac: :aead, prf: :sha384},
          %{key_exchange: :dhe_psk, cipher: :aes_128_gcm, mac: :aead, prf: :sha256}
-       ]}
+       ]},
+      # Aggressive timeout settings for fast disconnect detection
+      {:send_timeout, 5_000},
+      # Close socket after send timeout (5 seconds)
+      {:send_timeout_close, true}
+      # Close connection if send fails
     ]
 
     Application.put_env(:partisan, :tls_server_options, psk_options)
@@ -281,7 +350,7 @@ defmodule ElixirGateway.Cluster.Manager do
     end
   end
 
-  defp connect_to_peer(peer_address, _config) do
+  defp connect_to_peer(peer_address, config) do
     # Parse peer address: "node_name@host:port"
     case parse_peer_address(peer_address) do
       {:ok, node_name, host, port} ->
@@ -303,10 +372,17 @@ defmodule ElixirGateway.Cluster.Manager do
 
         case manager.join(peer_node) do
           :ok ->
-            Logger.info("Successfully connected to peer: #{peer_address}")
+            # Only log on initial connection attempt, not reconnections
+            if config != [] do
+              Logger.info("Attempting to connect to peer: #{peer_address}")
+            end
+
+            # Register on_up and on_down callbacks for immediate notifications
+            register_peer_callbacks(peer_node.name)
             :ok
 
           {:error, reason} ->
+            send(__MODULE__, {:peer_down, peer_node.name})
             Logger.warning("Failed to connect to peer #{peer_address}: #{inspect(reason)}")
             {:error, reason}
         end
@@ -315,6 +391,24 @@ defmodule ElixirGateway.Cluster.Manager do
         Logger.error("Invalid peer address #{peer_address}: #{reason}")
         {:error, reason}
     end
+  end
+
+  defp register_peer_callbacks(node_name) do
+    # Register on_up callback to send message when peer connects
+    :partisan_peer_service.on_up(
+      node_name,
+      fn ->
+        send(__MODULE__, {:peer_up, node_name, :up_detected})
+      end
+    )
+
+    # Register on_down callback to send message when peer disconnects
+    :partisan_peer_service.on_down(
+      node_name,
+      fn ->
+        send(__MODULE__, {:peer_down, node_name, :down_detected})
+      end
+    )
   end
 
   defp parse_peer_address(address) do
@@ -367,94 +461,6 @@ defmodule ElixirGateway.Cluster.Manager do
     end
   end
 
-  defp update_peer_health(configured_peers) do
-    connected = get_partisan_peers()
-
-    # Track configured peers (ones we're trying to connect to)
-    configured_health =
-      Enum.reduce(configured_peers, %{}, fn peer, acc ->
-        status =
-          case parse_peer_address(peer) do
-            {:ok, node_name, host, _port} ->
-              expected_node = String.to_atom("#{node_name}@#{host}")
-
-              if Enum.member?(connected, expected_node) do
-                :healthy
-              else
-                :disconnected
-              end
-
-            _ ->
-              :disconnected
-          end
-
-        Map.put(acc, peer, status)
-      end)
-
-    # Also track peers that connected to us (not in configured list)
-    # Convert connected node atoms to string format for consistency
-    connected_health =
-      connected
-      |> Enum.reject(fn node_atom ->
-        # Skip if already tracked in configured_peers
-        node_str = Atom.to_string(node_atom)
-
-        Enum.any?(configured_peers, fn peer ->
-          case parse_peer_address(peer) do
-            {:ok, node_name, host, _port} ->
-              "#{node_name}@#{host}" == node_str
-
-            _ ->
-              false
-          end
-        end)
-      end)
-      |> Enum.reduce(%{}, fn node_atom, acc ->
-        # Track connected peers as healthy (they're connected)
-        Map.put(acc, Atom.to_string(node_atom), :healthy)
-      end)
-
-    # Merge both maps
-    Map.merge(configured_health, connected_health)
-  end
-
-  defp log_health_changes(old_health, new_health) do
-    Enum.each(new_health, fn {peer, new_status} ->
-      old_status = Map.get(old_health, peer)
-
-      cond do
-        # New peer connected to us (wasn't tracked before, now healthy)
-        old_status == nil and new_status == :healthy ->
-          Logger.info("Peer connected: #{peer}")
-
-        # Peer went down
-        old_status == :healthy and new_status == :disconnected ->
-          Logger.warning("Peer disconnected: #{peer}")
-
-        # Peer recovered
-        old_status == :disconnected and new_status == :healthy ->
-          Logger.info("Peer recovered: #{peer}")
-
-        # No change
-        true ->
-          :ok
-      end
-    end)
-  end
-
-  defp reconnect_if_needed(configured_peers, peer_health) do
-    Enum.each(configured_peers, fn peer ->
-      case Map.get(peer_health, peer) do
-        :disconnected ->
-          # Silently attempt reconnection (already logged state change)
-          connect_to_peer(peer, [])
-
-        _ ->
-          :ok
-      end
-    end)
-  end
-
   defp get_node_ip do
     # Try to get IP from config first
     config = Application.get_env(:elixirgateway, :cluster, [])
@@ -498,7 +504,8 @@ defmodule ElixirGateway.Cluster.Manager do
     end
   end
 
-  defp schedule_heartbeat(interval) do
-    Process.send_after(self(), :send_heartbeat, interval)
+  defp schedule_peer_discovery do
+    # Check for new peers every 2 seconds
+    Process.send_after(self(), :discover_peers, 2_000)
   end
 end
