@@ -158,7 +158,8 @@ defmodule ElixirGateway.Cluster.Manager do
     # Find the peer in health map and mark as healthy
     # If not found (e.g., primary node with empty peers list), add it dynamically
     {found, updated_health} =
-      Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, _status}, {found_acc, acc} ->
+      Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, _status},
+                                                                    {found_acc, acc} ->
         if String.contains?(peer_key, peer_str) do
           Logger.info("Peer connected: #{peer_key}  #{extra}")
           {true, Map.put(acc, peer_key, :healthy)}
@@ -186,7 +187,8 @@ defmodule ElixirGateway.Cluster.Manager do
 
     # Find the peer in health map and mark as disconnected (including dynamically added peers)
     {found, updated_health} =
-      Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, status}, {found_acc, acc} ->
+      Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, status},
+                                                                    {found_acc, acc} ->
         if String.contains?(peer_key, peer_str) and status == :healthy do
           Logger.warning("Peer disconnected: #{peer_key}  #{extra}")
           {true, Map.put(acc, peer_key, :disconnected)}
@@ -265,6 +267,7 @@ defmodule ElixirGateway.Cluster.Manager do
     # (started by VM with --name flag and TLS options)
     if Node.alive?() do
       current_node = Node.self()
+
       Logger.info(
         "Distributed node already running: #{current_node} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
       )

@@ -50,6 +50,54 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
   # This must be done before the application starts
   System.put_env("ERL_DIST_PORT", to_string(listen_port))
 
+  # Parse DNS failover configuration
+  dns_failover_config =
+    if System.get_env("DNS_FAILOVER_ENABLED") == "true" do
+      # Parse DDNS_DOMAINS format: "host:domain:password,host:domain:password,..."
+      domains =
+        case System.get_env("DDNS_DOMAINS") do
+          nil ->
+            []
+
+          "" ->
+            []
+
+          domains_str ->
+            domains_str
+            |> String.split(",", trim: true)
+            |> Enum.map(fn entry ->
+              case String.split(entry, ":", parts: 3) do
+                [host, domain, password] ->
+                  %{host: host, domain: domain, password: password}
+
+                _ ->
+                  raise """
+                  Invalid DDNS_DOMAINS format: #{entry}
+                  Expected format: host:domain:password
+                  Example: @:example.com:password or api:example.com:password
+                  """
+              end
+            end)
+        end
+
+      # Determine public IP method
+      public_ip_method =
+        case System.get_env("PUBLIC_IP_STATIC") do
+          nil -> :auto
+          "" -> :auto
+          ip -> {:static, ip}
+        end
+
+      [
+        enabled: true,
+        provider: :namecheap_ddns,
+        public_ip_method: public_ip_method,
+        domains: domains
+      ]
+    else
+      [enabled: false]
+    end
+
   # Application config for cluster module
   config :elixirgateway, :cluster,
     enabled: true,
@@ -57,7 +105,8 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
     node_name: System.get_env("NODE_NAME"),
     node_ip: System.get_env("NODE_IP"),
     listen_port: listen_port,
-    peers: peers
+    peers: peers,
+    dns_failover: dns_failover_config
 end
 
 if config_env() == :prod do

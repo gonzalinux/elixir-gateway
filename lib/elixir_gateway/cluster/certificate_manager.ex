@@ -392,7 +392,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
       # Write certificates to disk
       cert_folder = Path.join([state.db_folder, "certs", cert_bundle.domain])
       File.mkdir_p!(cert_folder)
-      File.chmod!(state.db_folder, 0o700)
+      File.chmod!(cert_folder, 0o700)
 
       files = [
         {"cert.pem", cert_bundle.cert_pem},
