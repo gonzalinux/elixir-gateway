@@ -4,9 +4,17 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
   alias ElixirGatewayWeb.EnhancedGunWebSocketHandler
 
   setup do
-    # Connection pool is already started by the application
-    # Just clean up any existing connections
-    :ets.delete_all_objects(:websocket_connection_pool)
+    # Clean up any existing connections if the table exists
+    # The table is created by WebSocketConnectionPool when the application starts
+    case :ets.whereis(:websocket_connection_pool) do
+      :undefined ->
+        # Table doesn't exist yet - this is fine, tests will work without it
+        :ok
+
+      _ref ->
+        # Table exists, clean it up
+        :ets.delete_all_objects(:websocket_connection_pool)
+    end
 
     # Set test configuration
     original_config = Application.get_env(:elixirgateway, :websocket)

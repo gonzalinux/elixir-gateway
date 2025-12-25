@@ -4,7 +4,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   Architecture:
   - Primary node: Generates certificates via SiteEncrypt, broadcasts to peers
-  - Secondary nodes: Receive certificates via Partisan RPC, validate and install
+  - Secondary nodes: Receive certificates via distributed Erlang RPC, validate and install
 
   Role Determination:
   1. Auto-detect: Empty CLUSTER_PEERS → Primary, Non-empty → Secondary

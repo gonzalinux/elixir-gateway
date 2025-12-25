@@ -178,7 +178,7 @@ HTTPS_PORT="443"
 
 DNS query for automatic node discovery in clustered deployments (Kubernetes/Swarm).
 
-**Note:** This is different from Partisan clustering (see Clustering Configuration section).
+**Note:** This is different from distributed Erlang clustering (see Clustering Configuration section).
 
 ```bash
 # Kubernetes headless service
@@ -190,7 +190,7 @@ DNS_CLUSTER_QUERY="elixirgateway"
 
 ## Clustering Configuration
 
-ElixirGateway supports high-availability clustering using Partisan for encrypted peer-to-peer communication and automatic failover. See [CLUSTERING.md](CLUSTERING.md) for complete setup guide.
+ElixirGateway supports high-availability clustering using distributed Erlang for encrypted peer-to-peer communication and automatic failover. See [CLUSTERING.md](CLUSTERING.md) for complete setup guide.
 
 ### CLUSTER_ENABLED
 **Type:** Boolean ("true" or "false")
@@ -198,7 +198,7 @@ ElixirGateway supports high-availability clustering using Partisan for encrypted
 **Default:** "false"
 **Used in:** `lib/elixir_gateway/cluster/supervisor.ex:19`
 
-Enable Partisan clustering for high availability and automatic failover.
+Enable distributed Erlang clustering for high availability and automatic failover.
 
 ```bash
 CLUSTER_ENABLED="true"
@@ -265,7 +265,7 @@ NODE_IP="203.0.113.10"
 **Default:** 9100
 **Used in:** `lib/elixir_gateway/cluster/manager.ex:60`
 
-Port for Partisan cluster communication. Must be accessible between nodes.
+Port for distributed Erlang cluster communication. Must be accessible between nodes.
 
 ```bash
 CLUSTER_PORT="9100"
@@ -317,7 +317,7 @@ IS_PRIMARY="false"
 - Empty `CLUSTER_PEERS` → Primary
 - Non-empty `CLUSTER_PEERS` → Secondary
 
-**Use Case:** In a distributed cluster with the same DNS/domain on both nodes, only the primary should contact Let's Encrypt to avoid duplicate ACME challenges and rate limits. The secondary receives certificates via encrypted Partisan RPC.
+**Use Case:** In a distributed cluster with the same DNS/domain on both nodes, only the primary should contact Let's Encrypt to avoid duplicate ACME challenges and rate limits. The secondary receives certificates via encrypted distributed Erlang RPC.
 
 ### CERT_SYNC_ENABLED
 **Type:** Boolean ("true" or "false")
@@ -502,7 +502,7 @@ export HTTPS_PORT=8443
 
 ## See Also
 
-- [Clustering Guide](CLUSTERING.md) - High availability setup with Partisan
+- [Clustering Guide](CLUSTERING.md) - High availability setup with distributed Erlang
 - [Docker Deployment Guide](DOCKER.md)
 - [Let's Encrypt Setup Guide](LETSENCRYPT_SETUP.md)
 - [General Setup Instructions](SETUP.md)

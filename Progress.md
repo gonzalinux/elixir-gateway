@@ -7,13 +7,13 @@ This document tracks the implementation of the distributed clustering feature fo
 ### ✅ Completed Tasks
 
 #### 1. Dependencies (mix.exs:48-50)
-- [x] Added `{:partisan, "~> 5.0"}` for encrypted node distribution
+- [x] Configured distributed Erlang for encrypted node distribution
 - [x] Added `{:syn, "~> 3.3"}` for distributed process registry
 - [x] Added `{:req, "~> 0.4"}` for HTTP client (DDNS API and public IP detection)
 
 #### 2. Core Modules
 - [x] `ElixirGateway.Cluster.Supervisor` - Top-level supervisor; no-op if `enabled: false`
-- [x] `ElixirGateway.Cluster.Manager` - Partisan setup, peer connection, health heartbeats
+- [x] `ElixirGateway.Cluster.Manager` - Distributed Erlang setup, peer connection, health heartbeats
 - [x] `ElixirGateway.Cluster.ConnectionRegistry` - Distributed sticky sessions via Syn: `{client_ip, session_id}` → `node`
 - [x] `ElixirGateway.Cluster.DNSFailover` - Monitors peer, triggers DDNS update on failure
 - [x] `ElixirGateway.Cluster.DDNS.Namecheap` - DDNS client (same protocol as ddclient)
@@ -51,9 +51,9 @@ This document tracks the implementation of the distributed clustering feature fo
 
 Following the order specified in Distributed.md:
 
-1. ✅ Dependencies (partisan, syn, req)
+1. ✅ Dependencies (syn, req)
 2. ✅ `Cluster.Supervisor` — Conditional startup based on config
-3. ✅ `Cluster.Manager` — Partisan integration, peer health
+3. ✅ `Cluster.Manager` — Distributed Erlang integration, peer health
 4. ✅ `Cluster.ConnectionRegistry` — Syn-based distributed registry
 5. ✅ Plug modifications — Affinity checks
 6. ✅ `Cluster.DNSFailover` + `Cluster.DDNS.Namecheap` — DDNS integration

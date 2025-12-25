@@ -49,7 +49,7 @@ openssl rand -hex 32
 
 ## Certificate Management
 
-When running a distributed cluster with the same domain on both nodes, only the **primary** node should generate Let's Encrypt certificates. The **secondary** node receives certificates from the primary via encrypted Partisan RPC.
+When running a distributed cluster with the same domain on both nodes, only the **primary** node should generate Let's Encrypt certificates. The **secondary** node receives certificates from the primary via encrypted distributed Erlang RPC.
 
 ### Role Determination
 
@@ -77,7 +77,7 @@ Primary (Cloud)                Secondary (Home)
       │ 3. Computes SHA-256          │
       │    checksum                  │
       │                              │
-      │ 4. Partisan RPC ────────────►│ 5. Receives bundle
+      │ 4. Distributed Erlang RPC ──►│ 5. Receives bundle
       │                              │
       │                              │ 6. Validates checksum
       │                              │
@@ -138,7 +138,7 @@ SITE_ENCRYPT_DB=/etc/elixirgateway/certs
 - **No rate limits**: Avoid hitting Let's Encrypt's rate limits
 - **Seamless failover**: Secondary already has valid certificates
 - **Automatic sync**: Happens automatically on cert generation/renewal
-- **Secure transport**: Certificates transmitted over encrypted Partisan connection
+- **Secure transport**: Certificates transmitted over encrypted distributed Erlang connection
 - **Integrity validation**: SHA-256 checksums prevent corruption
 
 ## Dependencies
@@ -154,7 +154,7 @@ SITE_ENCRYPT_DB=/etc/elixirgateway/certs
 | Module | Purpose |
 |--------|---------|
 | `ElixirGateway.Cluster.Supervisor` | Top-level supervisor; no-op if `enabled: false` |
-| `ElixirGateway.Cluster.Manager` | Partisan setup, peer connection, health heartbeats |
+| `ElixirGateway.Cluster.Manager` | Distributed Erlang setup, peer connection, health heartbeats |
 | `ElixirGateway.Cluster.ConnectionRegistry` | Distributed sticky sessions via Syn: `{client_ip, session_id}` → `node` |
 | `ElixirGateway.Cluster.CertificateManager` | SSL certificate synchronization from primary to secondary nodes |
 | `ElixirGateway.Cluster.DNSFailover` | Monitors peer, triggers DDNS update on failure |
@@ -283,7 +283,7 @@ end
 ## Implementation Order
 
 1. `Cluster.Supervisor` — Conditional startup based on config
-2. `Cluster.Manager` — Partisan integration, peer health
+2. `Cluster.Manager` — Distributed Erlang integration, peer health
 3. `Cluster.ConnectionRegistry` — Syn-based distributed registry
 4. Plug modifications — Affinity checks
 5. `Cluster.DNSFailover` + `Cluster.DDNS.Namecheap` — DDNS integration
@@ -292,7 +292,7 @@ end
 
 ## Testing Strategy
 
-- **Unit tests**: Mock Partisan/Syn for registry logic
+- **Unit tests**: Mock distributed Erlang/Syn for registry logic
 - **Integration**: Two-node docker-compose with simulated failures
 - **Existing tests**: Must pass with `enabled: false` (default)
 
@@ -313,7 +313,7 @@ services:
     ports:
       - "80:4000"
       - "443:4001"
-      - "9100:9100"  # Partisan
+      - "9100:9100"  # Cluster communication
 ```
 
 ## Open Questions

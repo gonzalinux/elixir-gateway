@@ -141,11 +141,11 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
       )
 
       # Should not raise validation error - cloud nodes can have empty peers
-      # Validation passes, but may fail later when starting Partisan
+      # Validation passes, but may fail later when starting distributed Erlang
       # We just verify validation doesn't fail
       result = ClusterSupervisor.start_link([])
 
-      # Either succeeds or fails for non-validation reasons (e.g., Partisan not configured)
+      # Either succeeds or fails for non-validation reasons (e.g., distributed Erlang not configured)
       # The important part is it doesn't raise ArgumentError
       assert match?({:ok, _}, result) or match?({:error, _}, result)
 

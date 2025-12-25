@@ -33,7 +33,7 @@ defmodule ElixirGateway.Cluster.Supervisor do
 
     children =
       [
-        # Cluster manager handles Partisan setup and peer connections
+        # Cluster manager handles distributed Erlang setup and peer connections
         {ElixirGateway.Cluster.Manager, config},
 
         # Connection registry for distributed sticky sessions
