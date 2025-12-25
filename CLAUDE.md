@@ -40,9 +40,12 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Requ
 - **`MetricsAuthPlug`** - Protects `/metrics` endpoint with authentication
 
 #### WebSocket Proxying
-- **`GunWebSocketHandler`** - Uses Gun HTTP client for WebSocket proxying
+- **`EnhancedGunWebSocketHandler`** - Advanced WebSocket handler with connection pooling, automatic reconnection, and message queuing
 - Bidirectional message forwarding with session preservation
 - Full Phoenix LiveView support
+- Connection pooling for improved performance
+- Automatic reconnection with exponential backoff
+- Message queuing during connection interruptions
 
 #### Monitoring
 - **PromEx integration** with custom gateway metrics
