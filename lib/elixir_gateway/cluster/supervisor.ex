@@ -91,6 +91,7 @@ defmodule ElixirGateway.Cluster.Supervisor do
 
     # Peers must be a list (can be empty for asymmetric cloud setup)
     peers = Keyword.get(config, :peers)
+
     unless is_list(peers) do
       raise ArgumentError, """
       Clustering is enabled but :peers must be a list.

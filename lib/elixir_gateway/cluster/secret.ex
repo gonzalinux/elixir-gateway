@@ -53,6 +53,7 @@ defmodule ElixirGateway.Cluster.Secret do
       nil ->
         if Mix.env() in [:dev, :test] do
           secret = generate()
+
           IO.puts(:stderr, """
           WARNING: No #{env} found, generated temporary secret for development.
           This secret will not persist across restarts.

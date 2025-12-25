@@ -321,7 +321,11 @@ defmodule ElixirGateway.Cluster.CertificateManager do
         # ClusterManager not running
         if attempt + 1 < max_attempts do
           backoff_ms = Utils.exponential_backoff(attempt, base_delay: 100, jitter: :none)
-          Logger.debug("ClusterManager not available, retrying in #{backoff_ms}ms (#{max_attempts - attempt - 1} retries left)")
+
+          Logger.debug(
+            "ClusterManager not available, retrying in #{backoff_ms}ms (#{max_attempts - attempt - 1} retries left)"
+          )
+
           Process.sleep(backoff_ms)
           get_connected_peers_with_retry(attempt + 1, max_attempts)
         else
@@ -345,12 +349,14 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
     try do
       # Use partisan_rpc to call receive_certificates on remote node
+      # The 5th parameter is options, including timeout and channel
       case :partisan_rpc.call(
              peer_node,
              __MODULE__,
              :receive_certificates,
              [cert_bundle],
-             @rpc_timeout
+             timeout: @rpc_timeout,
+             channel: :default
            ) do
         :ok ->
           Logger.info("Successfully synced certificates to #{peer_node}")

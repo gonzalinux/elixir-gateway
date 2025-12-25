@@ -119,7 +119,8 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-node",
-        peers: "invalid"  # Not a list
+        # Not a list
+        peers: "invalid"
       )
 
       Process.flag(:trap_exit, true)
@@ -135,7 +136,8 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-node",
-        peers: []  # Empty list is valid for cloud nodes
+        # Empty list is valid for cloud nodes
+        peers: []
       )
 
       # Should not raise validation error - cloud nodes can have empty peers

@@ -18,7 +18,7 @@ ElixirGateway supports two different clustering systems:
 CLUSTER_ENABLED=true
 CLUSTER_SECRET=<64-char-hex>
 NODE_NAME=gateway-a
-CLUSTER_PEERS=gateway-b.example.com:9100
+CLUSTER_PEERS=gateway-b@gateway-b.example.com:9100
 ```
 
 ### DNS Clustering (DNS_CLUSTER_QUERY) - For Kubernetes/Swarm Only
@@ -123,7 +123,7 @@ services:
     environment:
       CLUSTER_SECRET: "your-secret"
       NODE_NAME: "gateway-a"
-      CLUSTER_PEERS: "gateway-b.example.com:9100"
+      CLUSTER_PEERS: "gateway-b@gateway-b.example.com:9100"
       DDNS_PASS: "your-ddns-password"
     ports:
       - "80:4000"

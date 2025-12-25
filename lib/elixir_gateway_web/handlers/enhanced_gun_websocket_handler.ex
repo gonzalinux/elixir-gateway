@@ -387,12 +387,13 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
     new_attempts = state.reconnect_attempts + 1
 
     # Exponential backoff with fixed jitter and max delay
-    final_delay = Utils.exponential_backoff(
-      new_attempts - 1,
-      base_delay: state.config.reconnect_base_delay,
-      max_delay: state.config.reconnect_max_delay,
-      jitter: :fixed
-    )
+    final_delay =
+      Utils.exponential_backoff(
+        new_attempts - 1,
+        base_delay: state.config.reconnect_base_delay,
+        max_delay: state.config.reconnect_max_delay,
+        jitter: :fixed
+      )
 
     Logger.info("Scheduling reconnection attempt #{new_attempts} in #{final_delay}ms")
 

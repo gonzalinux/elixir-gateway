@@ -51,10 +51,6 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
     node_ip: System.get_env("NODE_IP"),
     listen_port: String.to_integer(System.get_env("CLUSTER_PORT", "9100")),
     peers: peers
-
-  # Configure Partisan logging level
-  config :partisan,
-    log_level: :info
 end
 
 if config_env() == :prod do

@@ -126,7 +126,7 @@ SITE_ENCRYPT_DB=/etc/elixirgateway/certs
 CLUSTER_ENABLED=true
 CLUSTER_SECRET=<same-shared-secret>
 NODE_NAME=gateway-home
-CLUSTER_PEERS=gateway-cloud.example.com:9100  # Non-empty = auto-detected as secondary
+CLUSTER_PEERS=gateway-cloud@gateway-cloud.example.com:9100  # Non-empty = auto-detected as secondary
 
 # Let's Encrypt NOT configured (receives from primary)
 SITE_ENCRYPT_DB=/etc/elixirgateway/certs
@@ -307,7 +307,7 @@ services:
     environment:
       - CLUSTER_SECRET=same-secret-on-both-nodes
       - NODE_NAME=gateway-a
-      - CLUSTER_PEERS=gateway-b.example.com:9100
+      - CLUSTER_PEERS=gateway-b@gateway-b.example.com:9100
       # DDNS passwords from Namecheap dashboard (one per domain)
       - DDNS_PASS_EXAMPLE_COM=ddns-password-for-example
       - DDNS_PASS_ANOTHER=ddns-password-for-another

@@ -33,7 +33,9 @@ defmodule ElixirGateway.Cluster.SecretTest do
 
     test "rejects secret shorter than 32 characters" do
       short_secret = String.duplicate("a", 31)
-      assert {:error, "Secret must be at least 32 characters long"} = Secret.validate(short_secret)
+
+      assert {:error, "Secret must be at least 32 characters long"} =
+               Secret.validate(short_secret)
     end
 
     test "rejects secret with non-hex characters" do

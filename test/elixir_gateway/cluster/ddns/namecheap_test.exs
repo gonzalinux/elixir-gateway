@@ -207,7 +207,8 @@ defmodule ElixirGateway.Cluster.DDNS.NamecheapTest do
   # Helper functions to allow custom URLs for testing
 
   defp update_with_custom_url(host, domain, password, ip, url) do
-    full_url = "#{url}?#{URI.encode_query(%{host: host, domain: domain, password: password, ip: ip})}"
+    full_url =
+      "#{url}?#{URI.encode_query(%{host: host, domain: domain, password: password, ip: ip})}"
 
     case Req.get(full_url) do
       {:ok, %{status: 200, body: body}} ->

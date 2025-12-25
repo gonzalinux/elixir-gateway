@@ -277,14 +277,14 @@ CLUSTER_PORT="9100"
 **Default:** Empty
 **Used in:** `lib/elixir_gateway/cluster/manager.ex:58`
 
-Comma-separated list of peer addresses in `host:port` format.
+Comma-separated list of peer addresses in `node_name@host:port` format.
 
 ```bash
 # Single peer
-CLUSTER_PEERS="gateway-b.example.com:9100"
+CLUSTER_PEERS="gateway-b@gateway-b.example.com:9100"
 
 # Multiple peers
-CLUSTER_PEERS="gateway-b.example.com:9100,gateway-c.example.com:9100"
+CLUSTER_PEERS="gateway-b@192.168.1.100:9100,gateway-c@192.168.1.101:9100"
 
 # Empty for nodes that only accept connections (cloud server with static IP)
 CLUSTER_PEERS=""
@@ -292,7 +292,7 @@ CLUSTER_PEERS=""
 
 **Asymmetric Setup:** For cloud + home deployments:
 - Cloud node: `CLUSTER_PEERS=""` (accepts connections only)
-- Home node: `CLUSTER_PEERS="cloud.example.com:9100"` (initiates connection)
+- Home node: `CLUSTER_PEERS="gateway-cloud@cloud.example.com:9100"` (initiates connection)
 
 ### IS_PRIMARY
 **Type:** Boolean ("true" or "false")

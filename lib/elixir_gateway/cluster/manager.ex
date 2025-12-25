@@ -9,6 +9,25 @@ defmodule ElixirGateway.Cluster.Manager do
   - Monitor peer health status
   - Automatically reconnect to disconnected peers
 
+  ## Peer Address Format
+
+  Peer addresses must be specified in the format: `node_name@host:port`
+
+  Examples:
+  - `gateway-b@192.168.1.100:9100` - IP address
+  - `gateway-cloud@gateway.example.com:9100` - Hostname
+  - Multiple peers: `gateway-a@host1:9100,gateway-b@host2:9100`
+
+  ## Channel Configuration
+
+  Uses two channels (minimum required by Partisan):
+  - `undefined`: Required by Partisan internals (hardcoded dependency in v5.0.3)
+  - `default`: Used for application RPC calls with monotonic ordering
+
+  We explicitly specify `channel: :default` in RPC calls to use ordered delivery
+  for certificate synchronization. The `undefined` channel cannot be removed
+  due to Partisan's internal implementation requirements.
+
   ## Asymmetric Configuration
 
   Supports setups where one node has a static IP (cloud) and another has
@@ -110,6 +129,9 @@ defmodule ElixirGateway.Cluster.Manager do
     # as Partisan handles connection health internally
     new_peer_health = update_peer_health(state.peers)
 
+    # Log health state changes
+    log_health_changes(state.peer_health, new_peer_health)
+
     # Attempt to reconnect to disconnected peers
     reconnect_if_needed(state.peers, new_peer_health)
 
@@ -149,7 +171,8 @@ defmodule ElixirGateway.Cluster.Manager do
         # Not a valid IP, try DNS lookup
         case :inet.getaddr(to_charlist(host), :inet) do
           {:ok, ip_tuple} -> ip_tuple
-          {:error, _} -> to_charlist(host)  # Fallback to charlist
+          # Fallback to charlist
+          {:error, _} -> to_charlist(host)
         end
     end
   end
@@ -177,11 +200,11 @@ defmodule ElixirGateway.Cluster.Manager do
     # Application.put_env(:partisan, :data_dir, "/var/lib/partisan_data")
 
     # 4. Channels
-    # Must match the channels specified in connect_to_peer/2
+    # undefined: Required by Partisan internals (hardcoded dependency)
+    # default: Used for our RPC calls with monotonic ordering
     Application.put_env(:partisan, :channels, %{
       undefined: %{monotonic: false, parallelism: 1, compression: false},
-      default: %{monotonic: true, parallelism: 1},
-      partisan_membership: %{monotonic: false, parallelism: 1, compression: true}
+      default: %{monotonic: true, parallelism: 1, compression: false}
     })
 
     # 5. TLS with Shared Secret (No Certs)
@@ -189,11 +212,15 @@ defmodule ElixirGateway.Cluster.Manager do
     # Secret comes as hex-encoded string from env, needs to be decoded to bytes
     psk_secret =
       case Base.decode16(shared_secret, case: :lower) do
-        {:ok, bytes} -> bytes
+        {:ok, bytes} ->
+          bytes
+
         :error ->
           # Try mixed case
           case Base.decode16(shared_secret, case: :mixed) do
-            {:ok, bytes} -> bytes
+            {:ok, bytes} ->
+              bytes
+
             :error ->
               Logger.error("Invalid cluster secret format - must be hex-encoded")
               raise ArgumentError, "Cluster secret must be a valid hex string"
@@ -202,7 +229,10 @@ defmodule ElixirGateway.Cluster.Manager do
 
     # Validate secret length (minimum 32 bytes / 256 bits for security)
     if byte_size(psk_secret) < 32 do
-      Logger.error("Cluster secret is too short: #{byte_size(psk_secret)} bytes (minimum 32 bytes required)")
+      Logger.error(
+        "Cluster secret is too short: #{byte_size(psk_secret)} bytes (minimum 32 bytes required)"
+      )
+
       raise ArgumentError, "Cluster secret must be at least 32 bytes (64 hex characters)"
     end
 
@@ -221,23 +251,21 @@ defmodule ElixirGateway.Cluster.Manager do
       # Support TLS 1.2 only (TLS 1.3 PSK has different requirements)
       {:versions, [:"tlsv1.2"]},
       # PSK ciphersuites for TLS 1.2 (tuple format required)
-      {:ciphers, [
-        {:psk, :aes_128_cbc, :sha},
-        {:psk, :aes_256_cbc, :sha}
-      ]}
+      {:ciphers,
+       [
+         {:psk, :aes_128_cbc, :sha},
+         {:psk, :aes_256_cbc, :sha}
+       ]}
     ]
 
     Application.put_env(:partisan, :tls_server_options, psk_options)
     Application.put_env(:partisan, :tls_client_options, psk_options)
 
-    # Configure Partisan logging level
-    Application.put_env(:partisan, :log_level, :info)
-
     # 6. Start Application
     case Application.ensure_all_started(:partisan) do
       {:ok, _} ->
-        # Set Partisan modules to info level
-        :logger.set_application_level(:partisan, :info)
+        # Set Partisan log level
+        :logger.set_application_level(:partisan, :warning)
 
         Logger.info(
           "Partisan 5.0.3 started as #{full_node_name} on port #{listen_port} (PSK Enabled)"
@@ -251,9 +279,7 @@ defmodule ElixirGateway.Cluster.Manager do
   end
 
   defp connect_to_peer(peer_address, _config) do
-    # Parse peer address:
-    # Format 1: "node_name@host:port" (explicit node name)
-    # Format 2: "host:port" (derive node name from host)
+    # Parse peer address: "node_name@host:port"
     case parse_peer_address(peer_address) do
       {:ok, node_name, host, port} ->
         # Parse IP address (convert "127.0.0.1" to {127, 0, 0, 1})
@@ -265,8 +291,7 @@ defmodule ElixirGateway.Cluster.Manager do
           listen_addrs: [%{ip: ip_tuple, port: port}],
           channels: %{
             undefined: %{monotonic: false, parallelism: 1, compression: false},
-            default: %{monotonic: true, parallelism: 1},
-            partisan_membership: %{monotonic: false, parallelism: 1, compression: true}
+            default: %{monotonic: true, parallelism: 1, compression: false}
           }
         }
 
@@ -290,10 +315,9 @@ defmodule ElixirGateway.Cluster.Manager do
   end
 
   defp parse_peer_address(address) do
-    # Check if format is "node_name@host:port"
+    # Format: "node_name@host:port"
     case String.split(address, "@") do
       [node_name, host_port] ->
-        # Format: node_name@host:port
         case String.split(host_port, ":") do
           [host, port_str] ->
             case Integer.parse(port_str) do
@@ -305,22 +329,8 @@ defmodule ElixirGateway.Cluster.Manager do
             {:error, "Invalid format after @, expected host:port"}
         end
 
-      [host_port] ->
-        # Format: host:port (derive node name from host)
-        case String.split(host_port, ":") do
-          [host, port_str] ->
-            case Integer.parse(port_str) do
-              {port, ""} ->
-                node_name = extract_node_name(host)
-                {:ok, node_name, host, port}
-
-              _ ->
-                {:error, "Invalid port number"}
-            end
-
-          _ ->
-            {:error, "Invalid format, expected host:port or node@host:port"}
-        end
+      _ ->
+        {:error, "Invalid format, expected node_name@host:port"}
     end
   end
 
@@ -335,7 +345,6 @@ defmodule ElixirGateway.Cluster.Manager do
           # Get our own node name
           myself = Application.get_env(:partisan, :name)
 
-          # In Partisan 5, members() returns {:ok, [list of node atoms]}
           # Filter out self from the list
           members
           |> Enum.reject(fn member -> member == myself end)
@@ -358,26 +367,74 @@ defmodule ElixirGateway.Cluster.Manager do
   defp update_peer_health(configured_peers) do
     connected = get_partisan_peers()
 
-    Enum.reduce(configured_peers, %{}, fn peer, acc ->
-      # Parse peer to get node name
-      status =
-        case parse_peer_address(peer) do
-          {:ok, node_name, host, _port} ->
-            # Build expected node atom
-            expected_node = String.to_atom("#{node_name}@#{host}")
+    # Track configured peers (ones we're trying to connect to)
+    configured_health =
+      Enum.reduce(configured_peers, %{}, fn peer, acc ->
+        status =
+          case parse_peer_address(peer) do
+            {:ok, node_name, host, _port} ->
+              expected_node = String.to_atom("#{node_name}@#{host}")
 
-            # Check if this node is in the connected list
-            if Enum.member?(connected, expected_node) do
-              :healthy
-            else
+              if Enum.member?(connected, expected_node) do
+                :healthy
+              else
+                :disconnected
+              end
+
+            _ ->
               :disconnected
-            end
+          end
 
-          _ ->
-            :disconnected
-        end
+        Map.put(acc, peer, status)
+      end)
 
-      Map.put(acc, peer, status)
+    # Also track peers that connected to us (not in configured list)
+    # Convert connected node atoms to string format for consistency
+    connected_health =
+      connected
+      |> Enum.reject(fn node_atom ->
+        # Skip if already tracked in configured_peers
+        node_str = Atom.to_string(node_atom)
+        Enum.any?(configured_peers, fn peer ->
+          case parse_peer_address(peer) do
+            {:ok, node_name, host, _port} ->
+              "#{node_name}@#{host}" == node_str
+
+            _ ->
+              false
+          end
+        end)
+      end)
+      |> Enum.reduce(%{}, fn node_atom, acc ->
+        # Track connected peers as healthy (they're connected)
+        Map.put(acc, Atom.to_string(node_atom), :healthy)
+      end)
+
+    # Merge both maps
+    Map.merge(configured_health, connected_health)
+  end
+
+  defp log_health_changes(old_health, new_health) do
+    Enum.each(new_health, fn {peer, new_status} ->
+      old_status = Map.get(old_health, peer)
+
+      cond do
+        # New peer connected to us (wasn't tracked before, now healthy)
+        old_status == nil and new_status == :healthy ->
+          Logger.info("Peer connected: #{peer}")
+
+        # Peer went down
+        old_status == :healthy and new_status == :disconnected ->
+          Logger.warning("Peer disconnected: #{peer}")
+
+        # Peer recovered
+        old_status == :disconnected and new_status == :healthy ->
+          Logger.info("Peer recovered: #{peer}")
+
+        # No change
+        true ->
+          :ok
+      end
     end)
   end
 
@@ -385,7 +442,7 @@ defmodule ElixirGateway.Cluster.Manager do
     Enum.each(configured_peers, fn peer ->
       case Map.get(peer_health, peer) do
         :disconnected ->
-          Logger.info("Attempting to reconnect to disconnected peer: #{peer}")
+          # Silently attempt reconnection (already logged state change)
           connect_to_peer(peer, [])
 
         _ ->
@@ -414,7 +471,10 @@ defmodule ElixirGateway.Cluster.Manager do
                 ip
 
               {:error, local_reason} ->
-                Logger.error("Failed to auto-detect IP address. Public IP: #{inspect(reason)}, Local IP: #{inspect(local_reason)}")
+                Logger.error(
+                  "Failed to auto-detect IP address. Public IP: #{inspect(reason)}, Local IP: #{inspect(local_reason)}"
+                )
+
                 raise RuntimeError, """
                 Could not detect node IP address for clustering.
 
@@ -434,18 +494,6 @@ defmodule ElixirGateway.Cluster.Manager do
 
       _ ->
         raise ArgumentError, "NODE_IP cannot be empty. Please set a valid IP address."
-    end
-  end
-
-  defp extract_node_name(host) do
-    # If it looks like an IP address, use it as-is
-    # Otherwise, extract first part of hostname
-    if String.match?(host, ~r/^\d+\.\d+\.\d+\.\d+$/) do
-      # It's an IP address, use as-is
-      host
-    else
-      # It's a hostname, extract first part before '.'
-      host |> String.split(".") |> List.first()
     end
   end
 

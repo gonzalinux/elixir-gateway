@@ -3,14 +3,15 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   Monitors peer health and triggers DDNS updates on failure.
 
   Behavior:
+  - Primary nodes claim DNS on startup by updating DNS to point to themselves
   - Monitors cluster health via Cluster.Manager every 5 seconds
   - When all peers become unhealthy, schedules a DNS failover after a timeout
   - If peers recover during the timeout, the failover is cancelled
-  - When peers recover after failover, optionally updates DNS back (currently disabled)
   - Uses async scheduling to avoid blocking the GenServer during timeout
 
   This prevents unnecessary DNS updates if a peer briefly disconnects and
-  reconnects before the timeout expires.
+  reconnects before the timeout expires. Primary nodes always claim DNS on
+  startup to ensure they regain control when recovering from downtime.
   """
 
   use GenServer
@@ -81,6 +82,16 @@ defmodule ElixirGateway.Cluster.DNSFailover do
       pending_failover_ref: nil
     }
 
+    # If this is the primary node and domains are configured, claim DNS on startup
+    state =
+      if is_primary?() and domains != [] do
+        Logger.info("Primary node starting up, claiming DNS for domains: #{inspect(domains)}")
+        {_result, updated_state} = perform_dns_update(state)
+        updated_state
+      else
+        state
+      end
+
     # Schedule first health check
     schedule_health_check(check_interval)
 
@@ -111,12 +122,14 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     else
       Logger.warning("Executing scheduled DNS failover")
       {_result, updated_state} = perform_dns_update(state)
-      {:noreply, %{
-        updated_state |
-        last_state: :failed,
-        failover_triggered_at: System.monotonic_time(:millisecond),
-        pending_failover_ref: nil
-      }}
+
+      {:noreply,
+       %{
+         updated_state
+         | last_state: :failed,
+           failover_triggered_at: System.monotonic_time(:millisecond),
+           pending_failover_ref: nil
+       }}
     end
   end
 
@@ -132,10 +145,10 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     {result, updated_state} = perform_dns_update(state)
 
     new_state = %{
-      updated_state |
-      last_state: :failed,
-      failover_triggered_at: System.monotonic_time(:millisecond),
-      pending_failover_ref: nil
+      updated_state
+      | last_state: :failed,
+        failover_triggered_at: System.monotonic_time(:millisecond),
+        pending_failover_ref: nil
     }
 
     {:reply, result, new_state}
@@ -163,7 +176,10 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     cond do
       # Cluster was healthy, now unhealthy - schedule delayed failover
       state.last_state == :healthy and not cluster_healthy ->
-        Logger.warning("Cluster became unhealthy, scheduling DNS failover in #{state.failover_timeout}ms")
+        Logger.warning(
+          "Cluster became unhealthy, scheduling DNS failover in #{state.failover_timeout}ms"
+        )
+
         # Schedule failover asynchronously to avoid blocking the GenServer
         ref = Process.send_after(self(), :execute_failover, state.failover_timeout)
         %{state | last_state: :failing, pending_failover_ref: ref}
@@ -176,6 +192,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
           Process.cancel_timer(state.pending_failover_ref)
           Logger.info("Cancelled pending DNS failover (cluster recovered)")
         end
+
         %{state | last_state: :healthy, pending_failover_ref: nil}
 
       # First check or no state change
@@ -260,5 +277,22 @@ defmodule ElixirGateway.Cluster.DNSFailover do
 
   defp schedule_health_check(interval) do
     Process.send_after(self(), :check_health, interval)
+  end
+
+  defp is_primary? do
+    # Same logic as CertificateManager - check IS_PRIMARY or auto-detect from peers
+    case System.get_env("IS_PRIMARY") do
+      "true" ->
+        true
+
+      "false" ->
+        false
+
+      _ ->
+        # Auto-detect: empty CLUSTER_PEERS = primary
+        cluster_config = Application.get_env(:elixirgateway, :cluster, [])
+        peers = Keyword.get(cluster_config, :peers, [])
+        peers == []
+    end
   end
 end
