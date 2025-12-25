@@ -242,19 +242,22 @@ defmodule ElixirGateway.Cluster.Manager do
 
     Application.put_env(:partisan, :tls, true)
 
-    # Shared options for both Client and Server
+    # TLS 1.2 PSK configuration with forward secrecy
+    # Note: Erlang SSL does NOT support external PSK for TLS 1.3, only for TLS 1.2
+    # Using PSK-DHE (PSK with Diffie-Hellman Ephemeral) for forward secrecy
     psk_options = [
       {:psk_identity, ~c"partisan_cluster"},
       {:user_lookup_fun, lookup_fun},
       # Disable certificate verification for PSK-only auth
       {:verify, :verify_none},
-      # Support TLS 1.2 only (TLS 1.3 PSK has different requirements)
+      # TLS 1.2 (required for external PSK support in Erlang)
       {:versions, [:"tlsv1.2"]},
-      # PSK ciphersuites for TLS 1.2 (tuple format required)
+      # PSK-DHE ciphersuites with AEAD for forward secrecy and modern crypto
       {:ciphers,
        [
-         {:psk, :aes_128_cbc, :sha},
-         {:psk, :aes_256_cbc, :sha}
+         # DHE-PSK with AEAD (forward secrecy + authenticated encryption)
+         %{key_exchange: :dhe_psk, cipher: :aes_256_gcm, mac: :aead, prf: :sha384},
+         %{key_exchange: :dhe_psk, cipher: :aes_128_gcm, mac: :aead, prf: :sha256}
        ]}
     ]
 
@@ -268,7 +271,7 @@ defmodule ElixirGateway.Cluster.Manager do
         :logger.set_application_level(:partisan, :warning)
 
         Logger.info(
-          "Partisan 5.0.3 started as #{full_node_name} on port #{listen_port} (PSK Enabled)"
+          "Partisan 5.0.3 started as #{full_node_name} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
         )
 
         {:ok, full_node_name}
