@@ -8,11 +8,11 @@ ElixirGateway supports distributed clustering for high availability. Multiple ga
 
 ElixirGateway supports two different clustering systems:
 
-### Partisan Clustering (CLUSTER_ENABLED) - Recommended for Most Use Cases
+### Native Erlang Clustering (CLUSTER_ENABLED) - Recommended for Most Use Cases
 
 **Use when:** Cloud + home deployments, different networks, shared domains
-**Technology:** Partisan with encrypted PSK TLS
-**Benefits:** Works across NAT/firewalls, automatic certificate sync, DNS failover
+**Technology:** Erlang distribution with TLS 1.2 PSK authentication
+**Benefits:** Works across NAT/firewalls, automatic certificate sync, DNS failover, simpler architecture
 
 ```bash
 CLUSTER_ENABLED=true
@@ -20,6 +20,8 @@ CLUSTER_SECRET=<64-char-hex>
 NODE_NAME=gateway-a
 CLUSTER_PEERS=gateway-b@gateway-b.example.com:9100
 ```
+
+**Security:** Uses Pre-Shared Key (PSK) with Diffie-Hellman for forward secrecy (PSK-DHE cipher suites).
 
 ### DNS Clustering (DNS_CLUSTER_QUERY) - For Kubernetes/Swarm Only
 
@@ -31,7 +33,7 @@ CLUSTER_PEERS=gateway-b@gateway-b.example.com:9100
 DNS_CLUSTER_QUERY=elixirgateway.default.svc.cluster.local
 ```
 
-**Important:** Don't use both at the same time. For cloud + home with shared domains, use Partisan clustering.
+**Important:** Don't use both at the same time. For cloud + home with shared domains, use native Erlang clustering.
 
 ## Architecture
 
@@ -135,11 +137,13 @@ services:
 
 - **Node Naming**: Nodes use `name@ip` format (e.g., `gateway-a@192.168.1.10`)
 - **IP Detection**: Local IP auto-detected or configurable via `node_ip`
-- **Health Monitoring**: Nodes check each other every second
+- **TLS Encryption**: TLS 1.2 with PSK-DHE cipher suites (forward secrecy)
+- **Authentication**: Pre-Shared Key (PSK) from `CLUSTER_SECRET` environment variable
+- **Health Monitoring**: Nodes monitor each other via `:net_kernel.monitor_nodes/1`
 - **Sticky Sessions**: Connections stay on the same node
 - **Automatic Failover**: ~5-10 seconds when peer fails
 - **Auto Recovery**: Failed nodes rejoin automatically
-- **Automatic Reconnection**: Disconnected peers reconnect every second
+- **Automatic Reconnection**: Disconnected peers reconnect every 5 seconds
 - **Zero Overhead**: No performance impact when disabled
 
 ## Asymmetric Setup (Cloud + Home Server)
@@ -180,10 +184,11 @@ config :elixirgateway, :cluster,
 
 **Why this works:**
 - Home knows cloud's stable address and initiates connection
-- Partisan creates bidirectional connection (both see each other)
+- Erlang distribution creates bidirectional connection (both see each other)
 - When home IP changes, connection breaks → home reconnects automatically
 - Cloud doesn't need to know home's changing IP
 - DNS failover works on both nodes independently
+- TLS encryption protects all cluster communication
 
 ## Monitoring
 
@@ -217,5 +222,23 @@ ElixirGateway.Cluster.DNSFailover.trigger_failover()
 To verify the node name being used:
 ```elixir
 # In IEx or logs, look for:
-# "Partisan 5.0.3 started as gateway-a@192.168.1.10 on port 9100"
+# "Started distributed node: gateway-a@192.168.1.10 (TLS 1.2 PSK-DHE Enabled)"
 ```
+
+## Technical Details
+
+### TLS Configuration
+
+The cluster uses native Erlang distribution with TLS configured via `priv/ssl_dist.conf`:
+
+- **Protocol**: TLS 1.2 (Erlang doesn't support external PSK for TLS 1.3)
+- **Cipher Suites**: DHE-PSK with AES-GCM (forward secrecy + authenticated encryption)
+- **Authentication**: Pre-Shared Key retrieved from `CLUSTER_SECRET` environment variable
+- **Timeouts**: 5-second send timeout for fast failure detection
+
+### Security Considerations
+
+- **Secret Length**: Minimum 32 bytes (64 hex characters) required
+- **Secret Storage**: Should be stored securely and never committed to version control
+- **Forward Secrecy**: DHE-PSK ciphersuites provide forward secrecy
+- **No Certificates**: PSK authentication eliminates certificate management overhead

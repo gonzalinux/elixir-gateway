@@ -348,15 +348,13 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     Logger.debug("Sending certificates to #{peer_node}")
 
     try do
-      # Use partisan_rpc to call receive_certificates on remote node
-      # The 5th parameter is options, including timeout and channel
-      case :partisan_rpc.call(
+      # Use native Erlang RPC to call receive_certificates on remote node
+      case :rpc.call(
              peer_node,
              __MODULE__,
              :receive_certificates,
              [cert_bundle],
-             timeout: @rpc_timeout,
-             channel: :default
+             @rpc_timeout
            ) do
         :ok ->
           Logger.info("Successfully synced certificates to #{peer_node}")

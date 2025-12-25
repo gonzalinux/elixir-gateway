@@ -39,7 +39,7 @@ openssl rand -hex 32
                          │
          ┌───────────────┴───────────────┐
          ▼                               ▼
-   ┌──────────┐   Partisan (TLS)   ┌──────────┐
+   ┌──────────┐   Dist.. Erlang (TLS)   ┌──────────┐
    │Gateway A │◄──────────────────►│Gateway B │
    │ Primary  │   Shared Secret    │Secondary │
    └────┬─────┘                    └────┬─────┘
@@ -145,7 +145,6 @@ SITE_ENCRYPT_DB=/etc/elixirgateway/certs
 
 ```elixir
 # mix.exs
-{:partisan, "~> 5.0"},  # Encrypted node distribution
 {:syn, "~> 3.3"},       # Distributed process registry
 {:req, "~> 0.4"}        # HTTP client for DNS API
 ```

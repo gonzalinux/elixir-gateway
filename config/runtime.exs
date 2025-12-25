@@ -35,7 +35,7 @@ if System.get_env("HTTP_PORT") || System.get_env("HTTPS_PORT") do
   end
 end
 
-# Partisan clustering configuration (all environments)
+# Native Erlang distribution clustering configuration (all environments)
 if System.get_env("CLUSTER_ENABLED") == "true" do
   peers =
     case System.get_env("CLUSTER_PEERS") do
@@ -44,12 +44,19 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
       peers_str -> String.split(peers_str, ",", trim: true)
     end
 
+  listen_port = String.to_integer(System.get_env("CLUSTER_PORT", "9100"))
+
+  # Set kernel inet_dist port range via environment (before kernel starts)
+  # This must be done before the application starts
+  System.put_env("ERL_DIST_PORT", to_string(listen_port))
+
+  # Application config for cluster module
   config :elixirgateway, :cluster,
     enabled: true,
     secret: System.get_env("CLUSTER_SECRET"),
     node_name: System.get_env("NODE_NAME"),
     node_ip: System.get_env("NODE_IP"),
-    listen_port: String.to_integer(System.get_env("CLUSTER_PORT", "9100")),
+    listen_port: listen_port,
     peers: peers
 end
 

@@ -7,6 +7,23 @@ defmodule ElixirGateway.Application do
 
   @impl true
   def start(_type, _args) do
+    # Filter out notice level logs (typically OTP internals like syn)
+    filter_fn = fn log_event, _extra ->
+      case log_event do
+        # Block all notice level logs
+        %{level: :notice} ->
+          :stop
+
+        # Allow everything else
+        _ ->
+          :ignore
+      end
+    end
+
+    # Add filter at both primary and handler level
+    :logger.add_primary_filter(:filter_notice_logs, {filter_fn, []})
+    :logger.add_handler_filter(:default, :filter_notice_logs, {filter_fn, []})
+
     children = [
       ElixirGateway.PromEx,
       ElixirGatewayWeb.Telemetry,

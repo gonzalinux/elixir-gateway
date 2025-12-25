@@ -20,7 +20,7 @@ defmodule ElixirGateway.MixProject do
     [
       mod: {ElixirGateway.Application, []},
       extra_applications: [:logger, :runtime_tools],
-      included_applications: [:partisan, :syn]
+      included_applications: [:syn]
     ]
   end
 
@@ -46,7 +46,6 @@ defmodule ElixirGateway.MixProject do
       {:prom_ex, "~> 1.9"},
       {:site_encrypt, "~> 0.7"},
       {:gun, "~> 2.0"},
-      {:partisan, "~> 5.0.3"},
       {:syn, "~> 3.3"},
       {:req, "~> 0.4"},
       {:tidewave, "~> 0.1", only: :dev},

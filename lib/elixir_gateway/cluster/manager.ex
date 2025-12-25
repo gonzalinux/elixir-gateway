@@ -1,12 +1,11 @@
 defmodule ElixirGateway.Cluster.Manager do
   @moduledoc """
-  Manages Partisan setup, peer connections, and health heartbeats.
+  Manages native Erlang distribution setup, peer connections, and health heartbeats.
 
   Responsibilities:
-  - Configure and start Partisan with TLS encryption
+  - Configure and start Erlang distribution with TLS encryption and PSK authentication
   - Connect to peer nodes
-  - Send periodic health heartbeats
-  - Monitor peer health status
+  - Monitor peer health status via net_kernel
   - Automatically reconnect to disconnected peers
 
   ## Peer Address Format
@@ -18,15 +17,9 @@ defmodule ElixirGateway.Cluster.Manager do
   - `gateway-cloud@gateway.example.com:9100` - Hostname
   - Multiple peers: `gateway-a@host1:9100,gateway-b@host2:9100`
 
-  ## Channel Configuration
-
-  Uses two channels (minimum required by Partisan):
-  - `undefined`: Required by Partisan internals (hardcoded dependency in v5.0.3)
-  - `default`: Used for application RPC calls with monotonic ordering
-
-  We explicitly specify `channel: :default` in RPC calls to use ordered delivery
-  for certificate synchronization. The `undefined` channel cannot be removed
-  due to Partisan's internal implementation requirements.
+  Note: The port in the peer address is informational and stored for reference,
+  but the actual connection port is determined by the kernel configuration
+  (inet_dist_listen_min/max).
 
   ## Asymmetric Configuration
 
@@ -37,6 +30,14 @@ defmodule ElixirGateway.Cluster.Manager do
   This creates a bidirectional connection where the home node reconnects
   automatically when its IP changes, without requiring the cloud node to
   track the changing IP address.
+
+  ## TLS and PSK Authentication
+
+  Uses native Erlang distribution with inet_tls for TLS encryption and
+  PSK (Pre-Shared Key) authentication. Configuration is loaded from
+  priv/ssl_dist.conf which references the ssl_psk:lookup/3 function.
+
+  The shared secret is retrieved from the CLUSTER_SECRET environment variable.
   """
   alias ElixirGateway.Cluster.IPDetection
 
@@ -91,8 +92,8 @@ defmodule ElixirGateway.Cluster.Manager do
     listen_port = Keyword.get(config, :listen_port, @default_listen_port)
     heartbeat_interval = Keyword.get(config, :heartbeat_interval, @default_heartbeat_interval)
 
-    # Configure Partisan
-    configure_partisan(node_name, secret, listen_port)
+    # Configure and start Erlang distribution
+    start_distribution(node_name, secret, listen_port)
 
     # Initialize peer health with all configured peers as disconnected
     initial_peer_health =
@@ -112,11 +113,11 @@ defmodule ElixirGateway.Cluster.Manager do
       peer_health: initial_peer_health
     }
 
+    # Enable node monitoring to receive nodeup/nodedown messages
+    :net_kernel.monitor_nodes(true, node_type: :all)
+
     # Connect to peers asynchronously
     send(self(), :connect_to_peers)
-
-    # Start peer discovery timer to register callbacks for incoming connections
-    schedule_peer_discovery()
 
     Logger.info("Cluster manager started for node: #{node_name}")
 
@@ -126,9 +127,26 @@ defmodule ElixirGateway.Cluster.Manager do
   @impl true
   def handle_info(:connect_to_peers, state) do
     Enum.each(state.peers, fn peer ->
-      connect_to_peer(peer, state.config)
+      connect_to_peer(peer)
     end)
 
+    {:noreply, state}
+  end
+
+  # net_kernel sends these messages when nodes connect/disconnect
+  @impl true
+  def handle_info({:nodeup, node, _info}, state) do
+    # Convert to internal peer_up format for consistency
+    send(self(), {:peer_up, node, :up_detected})
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodedown, node, _info}, state) do
+    # Convert to internal peer_down format for consistency
+    send(self(), {:peer_down, node, :down_detected})
+    # Schedule reconnection
+    schedule_reconnect(node)
     {:noreply, state}
   end
 
@@ -138,17 +156,27 @@ defmodule ElixirGateway.Cluster.Manager do
     peer_str = Atom.to_string(peer_node)
 
     # Find the peer in health map and mark as healthy
-    updated_health =
-      Enum.reduce(state.peer_health, state.peer_health, fn {peer_key, _status}, acc ->
+    # If not found (e.g., primary node with empty peers list), add it dynamically
+    {found, updated_health} =
+      Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, _status}, {found_acc, acc} ->
         if String.contains?(peer_key, peer_str) do
           Logger.info("Peer connected: #{peer_key}  #{extra}")
-          Map.put(acc, peer_key, :healthy)
+          {true, Map.put(acc, peer_key, :healthy)}
         else
-          acc
+          {found_acc, acc}
         end
       end)
 
-    {:noreply, %{state | peer_health: updated_health}}
+    # If peer not in configured list, add it dynamically (for primary nodes)
+    final_health =
+      if not found do
+        Logger.info("Peer connected (dynamic): #{peer_str}  #{extra}")
+        Map.put(updated_health, peer_str, :healthy)
+      else
+        updated_health
+      end
+
+    {:noreply, %{state | peer_health: final_health}}
   end
 
   @impl true
@@ -156,58 +184,62 @@ defmodule ElixirGateway.Cluster.Manager do
     # Peer disconnected - update health state immediately
     peer_str = Atom.to_string(peer_node)
 
-    # Find the peer in health map and mark as disconnected
-    updated_health =
-      Enum.reduce(state.peer_health, state.peer_health, fn {peer_key, status}, acc ->
+    # Find the peer in health map and mark as disconnected (including dynamically added peers)
+    {found, updated_health} =
+      Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, status}, {found_acc, acc} ->
         if String.contains?(peer_key, peer_str) and status == :healthy do
           Logger.warning("Peer disconnected: #{peer_key}  #{extra}")
-          Map.put(acc, peer_key, :disconnected)
+          {true, Map.put(acc, peer_key, :disconnected)}
         else
-          acc
+          {found_acc, acc}
         end
       end)
 
-    {:noreply, %{state | peer_health: updated_health}}
+    # If peer not in health map but we got nodedown (shouldn't happen but be defensive)
+    final_health =
+      if not found do
+        Logger.warning("Peer disconnected (was not tracked): #{peer_str}  #{extra}")
+        updated_health
+      else
+        updated_health
+      end
+
+    {:noreply, %{state | peer_health: final_health}}
   end
 
   @impl true
-  def handle_info(:discover_peers, state) do
-    # Check for new peers that connected to us and register callbacks
-    connected = get_partisan_peers()
+  def handle_info({:reconnect, peer_node}, state) do
+    # Check if peer is in our configured peers list
+    peer_str = Atom.to_string(peer_node)
 
-    new_state =
-      Enum.reduce(connected, state, fn peer_node, acc_state ->
-        peer_str = Atom.to_string(peer_node)
-
-        # Check if we already have this peer in our health map
-
-        already_tracked =
-          Enum.any?(acc_state.peer_health, fn {peer_key, _} ->
-            String.contains?(peer_key, peer_str)
-          end)
-
-        if already_tracked do
-          acc_state
-        else
-          # New peer connected to us - add to health and register callbacks
-          Logger.info("Discovered new peer: #{peer_str}")
-          register_peer_callbacks(peer_node)
-
-          # Update health map to track this peer
-          updated_health = Map.put(acc_state.peer_health, peer_str, :healthy)
-          %{acc_state | peer_health: updated_health}
-        end
+    should_reconnect =
+      Enum.any?(state.peers, fn peer ->
+        String.contains?(peer, peer_str)
       end)
 
-    # Schedule next discovery check (every 2 seconds)
-    schedule_peer_discovery()
+    if should_reconnect do
+      case Node.connect(peer_node) do
+        true ->
+          Logger.info("Reconnected to #{peer_node}")
+          {:noreply, state}
 
-    {:noreply, new_state}
+        false ->
+          Logger.debug("Reconnection to #{peer_node} failed, will retry")
+          schedule_reconnect(peer_node)
+          {:noreply, state}
+
+        :ignored ->
+          Logger.debug("Node #{peer_node} already connected")
+          {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
   end
 
   @impl true
   def handle_call(:get_connected_peers, _from, state) do
-    peers = get_partisan_peers()
+    peers = Node.list(:connected)
     {:reply, peers, state}
   end
 
@@ -225,240 +257,97 @@ defmodule ElixirGateway.Cluster.Manager do
 
   ## Private Functions
 
-  defp parse_ip_address(host) do
-    # Try to parse as IP address, otherwise resolve via DNS
-    case :inet.parse_address(to_charlist(host)) do
-      {:ok, ip_tuple} ->
-        ip_tuple
+  defp start_distribution(node_name, secret, listen_port) do
+    # Validate secret
+    validate_secret!(secret)
 
-      {:error, _} ->
-        # Not a valid IP, try DNS lookup
-        case :inet.getaddr(to_charlist(host), :inet) do
-          {:ok, ip_tuple} -> ip_tuple
-          # Fallback to charlist
-          {:error, _} -> to_charlist(host)
-        end
-    end
-  end
-
-  defp configure_partisan(node_name, shared_secret, listen_port) do
-    # 1. Identity - Use node_name@ip format
-    my_ip = get_node_ip()
-    full_node_name = String.to_atom("#{node_name}@#{my_ip}")
-
-    # 2. Basic Partisan Config
-    # Note: Partisan 5 uses 'name' and 'peer_service_manager' keys
-    Application.put_env(:partisan, :name, full_node_name)
-
-    Application.put_env(
-      :partisan,
-      :peer_service_manager,
-      :partisan_pluggable_peer_service_manager
-    )
-
-    # 3. Networking & Storage
-    # Use Ets if you want clean slates, or omit this for disk persistence (default)
-    # Listen on all interfaces (0.0.0.0) to accept connections from any network
-    Application.put_env(:partisan, :listen_addrs, [%{ip: {0, 0, 0, 0}, port: listen_port}])
-    Application.put_env(:partisan, :storage_backend, Partisan.Storage.Backend.Ets)
-    # Application.put_env(:partisan, :data_dir, "/var/lib/partisan_data")
-
-    # 4. Channels
-    # undefined: Required by Partisan internals (hardcoded dependency)
-    # default: Used for our RPC calls with monotonic ordering
-    Application.put_env(:partisan, :channels, %{
-      undefined: %{monotonic: false, parallelism: 1, compression: false},
-      default: %{monotonic: true, parallelism: 1, compression: false}
-    })
-
-    # 5. TLS with Shared Secret (No Certs)
-    # We use Pre-Shared Key (PSK) authentication
-    # Secret comes as hex-encoded string from env, needs to be decoded to bytes
-    psk_secret =
-      case Base.decode16(shared_secret, case: :lower) do
-        {:ok, bytes} ->
-          bytes
-
-        :error ->
-          # Try mixed case
-          case Base.decode16(shared_secret, case: :mixed) do
-            {:ok, bytes} ->
-              bytes
-
-            :error ->
-              Logger.error("Invalid cluster secret format - must be hex-encoded")
-              raise ArgumentError, "Cluster secret must be a valid hex string"
-          end
-      end
-
-    # Validate secret length (minimum 32 bytes / 256 bits for security)
-    if byte_size(psk_secret) < 32 do
-      Logger.error(
-        "Cluster secret is too short: #{byte_size(psk_secret)} bytes (minimum 32 bytes required)"
+    # Check if node is already running in distributed mode
+    # (started by VM with --name flag and TLS options)
+    if Node.alive?() do
+      current_node = Node.self()
+      Logger.info(
+        "Distributed node already running: #{current_node} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
       )
 
-      raise ArgumentError, "Cluster secret must be at least 32 bytes (64 hex characters)"
-    end
+      {:ok, current_node}
+    else
+      # Not running in distributed mode - try to start it
+      # This path is used when running without --name flag
+      node_ip = get_node_ip()
+      full_node_name = String.to_atom("#{node_name}@#{node_ip}")
 
-    # Lookup function required by Erlang's :ssl for PSK
-    # It verifies the identity and returns the secret key
-    lookup_fun = {fn :psk, _id, _user_data -> {:ok, psk_secret} end, []}
+      # Set SSL dist config file path
+      ssl_conf_path = Path.join(:code.priv_dir(:elixirgateway), "ssl_dist.conf")
+      System.put_env("SSL_DIST_OPTFILE", ssl_conf_path)
 
-    Application.put_env(:partisan, :tls, true)
+      # Set distribution protocol to inet_tls
+      System.put_env("PROTO_DIST", "inet_tls")
 
-    # TLS 1.2 PSK configuration with forward secrecy
-    # Note: Erlang SSL does NOT support external PSK for TLS 1.3, only for TLS 1.2
-    # Using PSK-DHE (PSK with Diffie-Hellman Ephemeral) for forward secrecy
-    psk_options = [
-      {:psk_identity, ~c"partisan_cluster"},
-      {:user_lookup_fun, lookup_fun},
-      # Disable certificate verification for PSK-only auth
-      {:verify, :verify_none},
-      # TLS 1.2 (required for external PSK support in Erlang)
-      {:versions, [:"tlsv1.2"]},
-      # PSK-DHE ciphersuites with AEAD for forward secrecy and modern crypto
-      {:ciphers,
-       [
-         # DHE-PSK with AEAD (forward secrecy + authenticated encryption)
-         %{key_exchange: :dhe_psk, cipher: :aes_256_gcm, mac: :aead, prf: :sha384},
-         %{key_exchange: :dhe_psk, cipher: :aes_128_gcm, mac: :aead, prf: :sha256}
-       ]},
-      # Aggressive timeout settings for fast disconnect detection
-      {:send_timeout, 5_000},
-      # Close socket after send timeout (5 seconds)
-      {:send_timeout_close, true}
-      # Close connection if send fails
-    ]
+      # Configure kernel inet_dist port range before starting node
+      :application.set_env(:kernel, :inet_dist_listen_min, listen_port)
+      :application.set_env(:kernel, :inet_dist_listen_max, listen_port)
 
-    Application.put_env(:partisan, :tls_server_options, psk_options)
-    Application.put_env(:partisan, :tls_client_options, psk_options)
+      # Start node in distributed mode with longnames
+      case Node.start(full_node_name, :longnames, 15000) do
+        {:ok, _} ->
+          Logger.info(
+            "Started distributed node: #{full_node_name} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
+          )
 
-    # 6. Start Application
-    case Application.ensure_all_started(:partisan) do
-      {:ok, _} ->
-        # Set Partisan log level
-        :logger.set_application_level(:partisan, :warning)
+          {:ok, full_node_name}
 
-        Logger.info(
-          "Partisan 5.0.3 started as #{full_node_name} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
-        )
-
-        {:ok, full_node_name}
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          Logger.error("Failed to start node: #{inspect(reason)}")
+          {:error, reason}
+      end
     end
   end
 
-  defp connect_to_peer(peer_address, config) do
+  defp validate_secret!(secret) do
+    case Base.decode16(secret, case: :mixed) do
+      {:ok, bytes} when byte_size(bytes) >= 32 ->
+        :ok
+
+      {:ok, bytes} ->
+        raise ArgumentError,
+              "Cluster secret must be at least 32 bytes (64 hex chars), got #{byte_size(bytes)}"
+
+      :error ->
+        raise ArgumentError, "Cluster secret must be a valid hex string"
+    end
+  end
+
+  defp connect_to_peer(peer_address) do
     # Parse peer address: "node_name@host:port"
-    case parse_peer_address(peer_address) do
-      {:ok, node_name, host, port} ->
-        # Parse IP address (convert "127.0.0.1" to {127, 0, 0, 1})
-        ip_tuple = parse_ip_address(host)
+    # With EPMD, the port is registered and auto-discovered
+    case String.split(peer_address, ["@", ":"]) do
+      [node_name, host, _port_str] ->
+        # EPMD will look up the port automatically
+        peer_node = String.to_atom("#{node_name}@#{host}")
 
-        # Create Partisan node specification with channels
-        peer_node = %{
-          name: String.to_atom("#{node_name}@#{host}"),
-          listen_addrs: [%{ip: ip_tuple, port: port}],
-          channels: %{
-            undefined: %{monotonic: false, parallelism: 1, compression: false},
-            default: %{monotonic: true, parallelism: 1, compression: false}
-          }
-        }
-
-        # Attempt to join the peer using Partisan manager
-        manager = Application.get_env(:partisan, :peer_service_manager)
-
-        case manager.join(peer_node) do
-          :ok ->
-            # Only log on initial connection attempt, not reconnections
-            if config != [] do
-              Logger.info("Attempting to connect to peer: #{peer_address}")
-            end
-
-            # Register on_up and on_down callbacks for immediate notifications
-            register_peer_callbacks(peer_node.name)
+        case Node.connect(peer_node) do
+          true ->
+            Logger.info("Connected to peer: #{peer_address}")
             :ok
 
-          {:error, reason} ->
-            send(__MODULE__, {:peer_down, peer_node.name})
-            Logger.warning("Failed to connect to peer #{peer_address}: #{inspect(reason)}")
-            {:error, reason}
-        end
+          false ->
+            Logger.warning("Failed to connect to peer #{peer_address}")
+            {:error, :connection_failed}
 
-      {:error, reason} ->
-        Logger.error("Invalid peer address #{peer_address}: #{reason}")
-        {:error, reason}
-    end
-  end
-
-  defp register_peer_callbacks(node_name) do
-    # Register on_up callback to send message when peer connects
-    :partisan_peer_service.on_up(
-      node_name,
-      fn ->
-        send(__MODULE__, {:peer_up, node_name, :up_detected})
-      end
-    )
-
-    # Register on_down callback to send message when peer disconnects
-    :partisan_peer_service.on_down(
-      node_name,
-      fn ->
-        send(__MODULE__, {:peer_down, node_name, :down_detected})
-      end
-    )
-  end
-
-  defp parse_peer_address(address) do
-    # Format: "node_name@host:port"
-    case String.split(address, "@") do
-      [node_name, host_port] ->
-        case String.split(host_port, ":") do
-          [host, port_str] ->
-            case Integer.parse(port_str) do
-              {port, ""} -> {:ok, node_name, host, port}
-              _ -> {:error, "Invalid port number"}
-            end
-
-          _ ->
-            {:error, "Invalid format after @, expected host:port"}
+          :ignored ->
+            Logger.debug("Node #{peer_node} already connected")
+            :ok
         end
 
       _ ->
-        {:error, "Invalid format, expected node_name@host:port"}
+        Logger.error("Invalid peer address format: #{peer_address} (expected node@host:port)")
+        {:error, :invalid_format}
     end
   end
 
-  defp get_partisan_peers do
-    # Get the list of cluster members using Partisan's peer service API
-    try do
-      # Partisan 5.0.3 API - use partisan_peer_service module
-      manager = Application.get_env(:partisan, :peer_service_manager)
-
-      case manager.members() do
-        {:ok, members} when is_list(members) ->
-          # Get our own node name
-          myself = Application.get_env(:partisan, :name)
-
-          # Filter out self from the list
-          members
-          |> Enum.reject(fn member -> member == myself end)
-
-        {:error, reason} ->
-          Logger.warning("Failed to get Partisan members: #{inspect(reason)}")
-          []
-
-        other ->
-          Logger.warning("manager.members() returned unexpected format: #{inspect(other)}")
-          []
-      end
-    catch
-      kind, reason ->
-        Logger.warning("Partisan members call failed: #{inspect({kind, reason})}")
-        []
-    end
+  defp schedule_reconnect(peer_node) do
+    # Retry every 5 seconds
+    Process.send_after(self(), {:reconnect, peer_node}, 5_000)
   end
 
   defp get_node_ip do
@@ -502,10 +391,5 @@ defmodule ElixirGateway.Cluster.Manager do
           {:ok, ip} -> ip
         end
     end
-  end
-
-  defp schedule_peer_discovery do
-    # Check for new peers every 2 seconds
-    Process.send_after(self(), :discover_peers, 2_000)
   end
 end
