@@ -455,46 +455,43 @@ defmodule ElixirGateway.Cluster.Manager do
   defp get_node_ip do
     # Try to get IP from config first
     config = Application.get_env(:elixirgateway, :cluster, [])
+    configured_ip = Keyword.get(config, :node_ip)
 
-    case Keyword.get(config, :node_ip) do
-      nil ->
-        # Auto-detect public IP
-        case IPDetection.get_public_ip() do
-          {:ok, ip} ->
-            ip
+    cond do
+      # Use configured IP if provided and not empty
+      is_binary(configured_ip) and configured_ip != "" ->
+        configured_ip
 
-          {:error, reason} ->
-            Logger.warning("Failed to detect public IP (#{inspect(reason)}), trying local IP")
-
-            # Fallback to local IP detection
-            case IPDetection.get_local_ip() do
-              {:ok, ip} ->
-                ip
-
-              {:error, local_reason} ->
-                Logger.error(
-                  "Failed to auto-detect IP address. Public IP: #{inspect(reason)}, Local IP: #{inspect(local_reason)}"
-                )
-
-                raise RuntimeError, """
-                Could not detect node IP address for clustering.
-
-                Please explicitly set NODE_IP in your environment:
-                  export NODE_IP="your.server.ip.address"
-
-                For local testing on the same machine, use:
-                  export NODE_IP="127.0.0.1"
-
-                For production, use your server's public IP address.
-                """
-            end
-        end
-
-      ip when is_binary(ip) and ip != "" ->
-        ip
-
-      _ ->
+      # Empty string is invalid
+      configured_ip == "" ->
         raise ArgumentError, "NODE_IP cannot be empty. Please set a valid IP address."
+
+      # Try auto-detection: public IP first, then local IP
+      true ->
+        with {:error, public_reason} <- IPDetection.get_public_ip(),
+             _ =
+               Logger.warning(
+                 "Failed to detect public IP (#{inspect(public_reason)}), trying local IP"
+               ),
+             {:error, local_reason} <- IPDetection.get_local_ip() do
+          Logger.error(
+            "Failed to auto-detect IP address. Public IP: #{inspect(public_reason)}, Local IP: #{inspect(local_reason)}"
+          )
+
+          raise RuntimeError, """
+          Could not detect node IP address for clustering.
+
+          Please explicitly set NODE_IP in your environment:
+            export NODE_IP="your.server.ip.address"
+
+          For local testing on the same machine, use:
+            export NODE_IP="127.0.0.1"
+
+          For production, use your server's public IP address.
+          """
+        else
+          {:ok, ip} -> ip
+        end
     end
   end
 

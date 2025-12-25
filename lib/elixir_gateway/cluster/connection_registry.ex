@@ -66,7 +66,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   def register_connection(key) when is_tuple(key) do
     if clustering_enabled?() do
       case :syn.register(@registry_scope, key, self(), node()) do
-        {:ok, _pid} ->
+        :ok ->
           Logger.debug("Registered connection #{inspect(key)} on node #{node()}")
           :ok
 
