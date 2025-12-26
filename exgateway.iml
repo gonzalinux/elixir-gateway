@@ -201,5 +201,7 @@
     <orderEntry type="library" name="markdown" level="project" />
     <orderEntry type="library" name="cowboy_telemetry" level="project" />
     <orderEntry type="library" name="hackney" level="project" />
+    <orderEntry type="library" name="partisan" level="project" />
+    <orderEntry type="library" name="syn" level="project" />
   </component>
 </module>

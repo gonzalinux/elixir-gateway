@@ -13,29 +13,19 @@ install: ## Install dependencies only
 setup: ## Install dependencies and setup project
 	mix setup
 
-run: ## Start the Phoenix server
-	@if [ -f .env ]; then \
-		export $$(grep -vE '^\s*#|^\s*$$' .env | sed 's/#.*$$//' | xargs) && \
-		if [ "$$CLUSTER_ENABLED" = "true" ]; then \
-			elixir --name $$NODE_NAME@$$NODE_IP --erl "-proto_dist inet_tls -ssl_dist_optfile $(PWD)/priv/ssl_dist.conf -kernel inet_dist_listen_min $$CLUSTER_PORT inet_dist_listen_max $$CLUSTER_PORT" -S mix phx.server; \
-		else \
-			elixir -S mix phx.server; \
-		fi \
-	else \
-		elixir -S mix phx.server; \
-	fi
+run: ## Start the Phoenix server (loads .env if present)
+ifeq ($(OS),Windows_NT)
+	run_server.bat .env
+else
+	./run_server.sh .env
+endif
 
-run2: ## Start the Phoenix server with custom configuration
-	@if [ -f .env2 ]; then \
-		export $$(grep -vE '^\s*#|^\s*$$' .env2 | sed 's/#.*$$//' | xargs) && \
-		if [ "$$CLUSTER_ENABLED" = "true" ]; then \
-			elixir --name $$NODE_NAME@$$NODE_IP --erl "-proto_dist inet_tls -ssl_dist_optfile $(PWD)/priv/ssl_dist.conf -kernel inet_dist_listen_min $$CLUSTER_PORT inet_dist_listen_max $$CLUSTER_PORT" -S mix phx.server; \
-		else \
-			elixir -S mix phx.server; \
-		fi \
-	else \
-		elixir -S mix phx.server; \
-	fi
+run2: ## Start the Phoenix server with .env2 configuration
+ifeq ($(OS),Windows_NT)
+	run_server.bat .env2
+else
+	./run_server.sh .env2
+endif
 
 install-certbot: ## Install certbot for SSL certificate management
 	@echo "Installing certbot via snap..."
