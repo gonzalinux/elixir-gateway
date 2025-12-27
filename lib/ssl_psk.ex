@@ -31,7 +31,7 @@ defmodule :ssl_psk do
   def lookup(:psk, _psk_id, _user_state) do
     case System.get_env("CLUSTER_SECRET") do
       nil ->
-        Logger.error("PSK authentication failed: configuration error")
+        Logger.error("PSK authentication failed: no secret was found")
         :error
 
       secret when is_binary(secret) ->
@@ -44,12 +44,12 @@ defmodule :ssl_psk do
       {:ok, bytes} when byte_size(bytes) >= @min_secret_bytes ->
         {:ok, bytes}
 
-      {:ok, bytes} ->
-        Logger.error("PSK authentication failed: configuration error")
+      {:ok, _bytes} ->
+        Logger.error("PSK authentication failed: the secret is less than #{@min_secret_bytes}")
         :error
 
       :error ->
-        Logger.error("PSK authentication failed: configuration error")
+        Logger.error("PSK authentication failed: the secret could not be decoded")
         :error
     end
   end

@@ -37,6 +37,9 @@ end
 
 # Native Erlang distribution clustering configuration (all environments)
 if System.get_env("CLUSTER_ENABLED") == "true" do
+  secret = System.get_env("CLUSTER_SECRET") ||
+    raise "CLUSTER_ENABLED=true requires CLUSTER_SECRET to be set"
+
   peers =
     case System.get_env("CLUSTER_PEERS") do
       nil -> []
@@ -101,7 +104,7 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
   # Application config for cluster module
   config :elixirgateway, :cluster,
     enabled: true,
-    secret: System.get_env("CLUSTER_SECRET"),
+    secret: secret,
     node_name: System.get_env("NODE_NAME"),
     node_ip: System.get_env("NODE_IP"),
     listen_port: listen_port,
