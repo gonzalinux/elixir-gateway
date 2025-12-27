@@ -31,7 +31,7 @@ defmodule :ssl_psk do
   def lookup(:psk, _psk_id, _user_state) do
     case System.get_env("CLUSTER_SECRET") do
       nil ->
-        Logger.error("PSK authentication failed: CLUSTER_SECRET environment variable not set")
+        Logger.error("PSK authentication failed: configuration error")
         :error
 
       secret when is_binary(secret) ->
@@ -45,17 +45,11 @@ defmodule :ssl_psk do
         {:ok, bytes}
 
       {:ok, bytes} ->
-        Logger.error(
-          "PSK authentication failed: secret too short (#{byte_size(bytes)} bytes, minimum #{@min_secret_bytes} bytes required)"
-        )
-
+        Logger.error("PSK authentication failed: configuration error")
         :error
 
       :error ->
-        Logger.error(
-          "PSK authentication failed: invalid hex encoding in CLUSTER_SECRET (expected hex string of at least #{@min_secret_bytes * 2} characters)"
-        )
-
+        Logger.error("PSK authentication failed: configuration error")
         :error
     end
   end
