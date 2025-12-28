@@ -145,7 +145,6 @@ SITE_ENCRYPT_DB=/etc/elixirgateway/certs
 
 ```elixir
 # mix.exs
-{:syn, "~> 3.3"},       # Distributed process registry
 {:req, "~> 0.4"}        # HTTP client for DNS API
 ```
 
@@ -155,7 +154,7 @@ SITE_ENCRYPT_DB=/etc/elixirgateway/certs
 |--------|---------|
 | `ElixirGateway.Cluster.Supervisor` | Top-level supervisor; no-op if `enabled: false` |
 | `ElixirGateway.Cluster.Manager` | Distributed Erlang setup, peer connection, health heartbeats |
-| `ElixirGateway.Cluster.ConnectionRegistry` | Distributed sticky sessions via Syn: `{client_ip, session_id}` → `node` |
+| `ElixirGateway.Cluster.ConnectionRegistry` | Local ETS-based sticky sessions with TTL: `{client_ip, session_id}` → `backend_node` |
 | `ElixirGateway.Cluster.CertificateManager` | SSL certificate synchronization from primary to secondary nodes |
 | `ElixirGateway.Cluster.DNSFailover` | Monitors peer, triggers DDNS update on failure |
 | `ElixirGateway.Cluster.DDNS.Namecheap` | DDNS client (same protocol as ddclient) |
@@ -284,7 +283,7 @@ end
 
 1. `Cluster.Supervisor` — Conditional startup based on config
 2. `Cluster.Manager` — Distributed Erlang integration, peer health
-3. `Cluster.ConnectionRegistry` — Syn-based distributed registry
+3. `Cluster.ConnectionRegistry` — Local ETS-based session registry with TTL
 4. Plug modifications — Affinity checks
 5. `Cluster.DNSFailover` + `Cluster.DDNS.Namecheap` — DDNS integration
 6. Mix task — Secret generator
@@ -292,7 +291,7 @@ end
 
 ## Testing Strategy
 
-- **Unit tests**: Mock distributed Erlang/Syn for registry logic
+- **Unit tests**: Test session persistence, TTL cleanup, and routing logic
 - **Integration**: Two-node docker-compose with simulated failures
 - **Existing tests**: Must pass with `enabled: false` (default)
 

@@ -98,6 +98,9 @@
       <excludeFolder url="file://$MODULE_DIR$/deps" />
       <excludeFolder url="file://$MODULE_DIR$/doc" />
       <excludeFolder url="file://$MODULE_DIR$/logs" />
+      <excludeFolder url="file://$MODULE_DIR$/_build/dev/lib/syn" />
+      <excludeFolder url="file://$MODULE_DIR$/_build/test/lib/req" />
+      <excludeFolder url="file://$MODULE_DIR$/_build/test/lib/syn" />
     </content>
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="phoenix" level="project" />

@@ -47,6 +47,14 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Requ
 - Automatic reconnection with exponential backoff
 - Message queuing during connection interruptions
 
+#### Sticky Sessions (Cluster Mode)
+- **`ConnectionRegistry`** - Local ETS-based session affinity with TTL
+- Ensures same client always hits same backend node (critical for eventual consistency)
+- Session identification: IP + (WebSocket key | cookie | X-Session-ID | nil)
+- TTL-based cleanup prevents memory leaks (default: 30min inactivity)
+- Configurable via `:cluster` config with `session_ttl_minutes` and `cleanup_interval_minutes`
+- Monitoring: `session_count/0` and Prometheus metric `elixirgateway_session_registry_active_sessions`
+
 #### Monitoring
 - **PromEx integration** with custom gateway metrics
 - **`/metrics`** endpoint for Prometheus scraping (auth required in prod)

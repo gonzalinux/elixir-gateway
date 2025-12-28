@@ -20,7 +20,10 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       cluster_health_metrics(poll_rate),
 
       # DNS failover metrics
-      dns_failover_metrics(poll_rate)
+      dns_failover_metrics(poll_rate),
+
+      # Session registry metrics
+      session_registry_metrics(poll_rate)
     ]
   end
 
@@ -126,6 +129,22 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           event_name: [:elixirgateway, :dns_failover, :time_since_last],
           description: "Time in milliseconds since last failover (0 if never triggered)",
           measurement: :duration
+        )
+      ]
+    )
+  end
+
+  defp session_registry_metrics(poll_rate) do
+    Polling.build(
+      :session_registry_metrics,
+      poll_rate,
+      {__MODULE__, :execute_session_registry, []},
+      [
+        last_value(
+          [:elixirgateway, :session_registry, :active_sessions],
+          event_name: [:elixirgateway, :session_registry, :active_sessions],
+          description: "Number of active sticky sessions in the registry",
+          measurement: :count
         )
       ]
     )
@@ -271,5 +290,14 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           duration: time_since_last
         })
     end
+  end
+
+  def execute_session_registry do
+    # Get active session count from ConnectionRegistry
+    session_count = ElixirGateway.Cluster.ConnectionRegistry.session_count()
+
+    :telemetry.execute([:elixirgateway, :session_registry, :active_sessions], %{
+      count: session_count
+    })
   end
 end
