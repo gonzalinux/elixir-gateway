@@ -19,7 +19,7 @@ if exist %ENV_FILE% (
     )
 )
 mix deps.get
-mid compile
+mix compile
 
 REM Check if clustering is enabled
 if "%CLUSTER_ENABLED%"=="true" (

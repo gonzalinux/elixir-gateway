@@ -12,7 +12,7 @@ if [ -f "$ENV_FILE" ]; then
     export $(grep -vE '^\s*#|^\s*$' "$ENV_FILE" | sed 's/#.*$//' | xargs)
 fi
 mix deps.get
-mid compile
+mix compile
 
 # Check if clustering is enabled
 if [ "$CLUSTER_ENABLED" = "true" ]; then
