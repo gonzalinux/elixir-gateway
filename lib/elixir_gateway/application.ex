@@ -21,8 +21,8 @@ defmodule ElixirGateway.Application do
     end
 
     # Add filter at both primary and handler level
-    :logger.add_primary_filter(:filter_notice_logs, {filter_fn, []})
-    :logger.add_handler_filter(:default, :filter_notice_logs, {filter_fn, []})
+    # :logger.add_primary_filter(:filter_notice_logs, {filter_fn, []})
+    # :logger.add_handler_filter(:default, :filter_notice_logs, {filter_fn, []})
 
     children = [
       ElixirGateway.PromEx,

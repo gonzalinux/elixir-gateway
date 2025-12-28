@@ -290,23 +290,23 @@ CLUSTER_PEERS="gateway-b@192.168.1.100:9100,gateway-c@192.168.1.101:9100"
 CLUSTER_PEERS=""
 ```
 
-**Asymmetric Setup:** For cloud + home deployments:
-- Cloud node: `CLUSTER_PEERS=""` (accepts connections only)
-- Home node: `CLUSTER_PEERS="gateway-cloud@cloud.example.com:9100"` (initiates connection)
+**Asymmetric Setup (Recommended):** For cloud + home deployments:
+- Home node (Primary): `CLUSTER_PEERS="gateway-cloud@cloud.example.com:9100"` (knows cloud's static IP, initiates connection)
+- Cloud node (Secondary): `CLUSTER_PEERS=""` (accepts connections only, doesn't need to know home's dynamic IP)
 
 ### IS_PRIMARY
 **Type:** Boolean ("true" or "false")
 **Required:** No
-**Default:** Auto-detected from CLUSTER_PEERS
-**Used in:** `lib/elixir_gateway/cluster/certificate_manager.ex:229`
+**Default:** Auto-detected from DNS failover configuration
+**Used in:** `lib/elixir_gateway/cluster/certificate_manager.ex:228` and `lib/elixir_gateway/cluster/dns_failover.ex:282`
 
-Explicitly designate this node as primary (generates SSL certificates) or secondary (receives certificates).
+Explicitly designate this node as primary (generates SSL certificates, manages DNS) or secondary (receives certificates).
 
 ```bash
-# Force as primary (generates Let's Encrypt certificates)
+# Force as primary (generates Let's Encrypt certificates, manages DNS failover)
 IS_PRIMARY="true"
 
-# Force as secondary (receives certificates from primary)
+# Force as secondary (receives certificates from primary, doesn't manage DNS)
 IS_PRIMARY="false"
 
 # Auto-detect (recommended)
@@ -314,8 +314,12 @@ IS_PRIMARY="false"
 ```
 
 **Auto-detection Logic:**
-- Empty `CLUSTER_PEERS` → Primary
-- Non-empty `CLUSTER_PEERS` → Secondary
+- DNS failover enabled (has domains configured) → Primary role
+- DNS failover disabled or no domains → Secondary role
+
+**Typical Setup:**
+- Primary (home server): Has `DDNS_DOMAINS` configured, manages DNS failover when cloud fails
+- Secondary (cloud servers): No `DDNS_DOMAINS`, just handles traffic
 
 **Use Case:** In a distributed cluster with the same DNS/domain on both nodes, only the primary should contact Let's Encrypt to avoid duplicate ACME challenges and rate limits. The secondary receives certificates via encrypted distributed Erlang RPC.
 

@@ -21,15 +21,24 @@ defmodule ElixirGateway.Cluster.Manager do
   but the actual connection port is determined by the kernel configuration
   (inet_dist_listen_min/max).
 
-  ## Asymmetric Configuration
+  ## Typical Setup (Asymmetric Configuration)
 
-  Supports setups where one node has a static IP (cloud) and another has
-  a dynamic IP (home). The dynamic IP node should list the static IP node
-  as a peer, while the static IP node can have an empty peers list.
+  **Primary (Home Server)**:
+  - Has dynamic IP that may change
+  - Knows the cloud server static IPs
+  - Initiates connections to cloud servers
+  - Config: `CLUSTER_PEERS="cloud-a@1.2.3.4:9100,cloud-b@5.6.7.8:9100"`
+  - Reconnects automatically when IP changes
 
-  This creates a bidirectional connection where the home node reconnects
-  automatically when its IP changes, without requiring the cloud node to
-  track the changing IP address.
+  **Secondary (Cloud Servers)**:
+  - Have static IPs
+  - Accept incoming connections from primary
+  - Don't need to know primary's IP (it changes)
+  - Config: `CLUSTER_PEERS=""` (empty)
+
+  This creates a bidirectional connection where the home node initiates
+  and reconnects automatically when its IP changes, without requiring the
+  cloud nodes to track the changing IP address.
 
   ## TLS and PSK Authentication
 

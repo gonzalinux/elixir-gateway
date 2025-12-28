@@ -3,11 +3,21 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   Monitors peer health and triggers DDNS updates on failure.
 
   Behavior:
-  - Primary nodes claim DNS on startup by updating DNS to point to themselves
+  - Primary nodes (home server) claim DNS on startup by updating DNS to point to themselves
   - Monitors cluster health via Cluster.Manager every 5 seconds
   - When all peers become unhealthy, schedules a DNS failover after a timeout
   - If peers recover during the timeout, the failover is cancelled
   - Uses async scheduling to avoid blocking the GenServer during timeout
+
+  ## Role Determination
+
+  Primary role is determined by:
+  1. Explicit: `IS_PRIMARY=true` environment variable
+  2. Auto-detect: If DNS failover domains are configured → Primary
+
+  Typical setup:
+  - Primary (home server): Manages DNS updates when cloud servers fail, has `DDNS_DOMAINS` configured
+  - Secondary (cloud servers): Don't manage DNS, just handle traffic, no `DDNS_DOMAINS`
 
   This prevents unnecessary DNS updates if a peer briefly disconnects and
   reconnects before the timeout expires. Primary nodes always claim DNS on
@@ -280,7 +290,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   end
 
   defp is_primary? do
-    # Same logic as CertificateManager - check IS_PRIMARY or auto-detect from peers
+    # Check IS_PRIMARY env var or auto-detect from DNS failover configuration
     case System.get_env("IS_PRIMARY") do
       "true" ->
         true
@@ -289,10 +299,13 @@ defmodule ElixirGateway.Cluster.DNSFailover do
         false
 
       _ ->
-        # Auto-detect: empty CLUSTER_PEERS = primary
+        # Auto-detect: If DNS failover domains are configured, this is the primary
+        # (primary manages DNS updates, typically the home server)
+        # Secondary nodes (cloud) don't manage DNS, they just accept connections
         cluster_config = Application.get_env(:elixirgateway, :cluster, [])
-        peers = Keyword.get(cluster_config, :peers, [])
-        peers == []
+        dns_config = Keyword.get(cluster_config, :dns_failover, [])
+        domains = Keyword.get(dns_config, :domains, [])
+        domains != [] and Keyword.get(dns_config, :enabled, false)
     end
   end
 end

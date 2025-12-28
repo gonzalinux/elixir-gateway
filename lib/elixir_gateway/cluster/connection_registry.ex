@@ -196,10 +196,9 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   """
   def session_count do
     if clustering_enabled?() do
-      try do
-        :ets.info(@session_table, :size)
-      rescue
-        ArgumentError -> 0
+      case :ets.info(@session_table, :size) do
+        :undefined -> 0
+        size when is_integer(size) -> size
       end
     else
       0

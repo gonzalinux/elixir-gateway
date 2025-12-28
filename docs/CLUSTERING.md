@@ -150,23 +150,9 @@ services:
 
 For deployments with one static IP (cloud) and one dynamic IP (home):
 
-**Cloud Node** (static IP, accepts connections):
-```elixir
-config :elixirgateway, :cluster,
-  enabled: true,
-  secret: System.get_env("CLUSTER_SECRET"),
-  node_name: "gateway-cloud",
-  node_ip: System.get_env("CLOUD_PRIVATE_IP"),  # Optional: specify exact IP
-  listen_port: 9100,
-  peers: [],  # Empty - accepts connections only
-  dns_failover: [
-    enabled: true,
-    public_ip_method: {:static, System.get_env("CLOUD_PUBLIC_IP")},
-    domains: [...]
-  ]
-```
+### Recommended: Home Server as Primary
 
-**Home Node** (dynamic IP, initiates connections):
+**Home Server (Primary)** - Dynamic IP, manages DNS, initiates connections:
 ```elixir
 config :elixirgateway, :cluster,
   enabled: true,
@@ -174,20 +160,62 @@ config :elixirgateway, :cluster,
   node_name: "gateway-home",
   node_ip: nil,  # Auto-detect (optional, can be omitted)
   listen_port: 9100,
-  peers: ["cloud.example.com:9100"],  # Connects to stable address
+  peers: ["gateway-cloud@cloud.example.com:9100"],  # Knows cloud's static address
   dns_failover: [
-    enabled: true,
+    enabled: true,  # Primary manages DNS failover
     public_ip_method: :auto,  # Auto-detect changing IP
-    domains: [...]
+    domains: [
+      %{host: "@", domain: "example.com", password: System.get_env("DDNS_PASS")}
+    ]
   ]
 ```
+
+**Cloud Server (Secondary)** - Static IP, receives connections:
+```elixir
+config :elixirgateway, :cluster,
+  enabled: true,
+  secret: System.get_env("CLUSTER_SECRET"),
+  node_name: "gateway-cloud",
+  node_ip: System.get_env("CLOUD_PRIVATE_IP"),  # Optional: specify exact IP
+  listen_port: 9100,
+  peers: [],  # Empty - just accepts connections
+  dns_failover: [
+    enabled: false  # Secondary doesn't manage DNS
+  ]
+```
+
+**Environment Variables (Alternative):**
+
+Home Server:
+```bash
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<64-char-hex>
+NODE_NAME=gateway-home
+CLUSTER_PEERS=gateway-cloud@cloud.example.com:9100
+DNS_FAILOVER_ENABLED=true
+DDNS_DOMAINS=@:example.com:password
+```
+
+Cloud Server:
+```bash
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<same-secret>
+NODE_NAME=gateway-cloud
+CLUSTER_PEERS=  # Empty
+DNS_FAILOVER_ENABLED=false
+```
+
+**Role Detection:**
+- Explicit: Use `IS_PRIMARY=true` (home) or `IS_PRIMARY=false` (cloud)
+- Auto-detect: DNS failover enabled → Primary role (home manages DNS when cloud fails)
 
 **Why this works:**
 - Home knows cloud's stable address and initiates connection
 - Erlang distribution creates bidirectional connection (both see each other)
 - When home IP changes, connection breaks → home reconnects automatically
-- Cloud doesn't need to know home's changing IP
-- DNS failover works on both nodes independently
+- Cloud doesn't need to know home's changing IP (it changes constantly)
+- Home manages DNS updates (primary role)
+- Cloud just handles traffic (secondary role)
 - TLS encryption protects all cluster communication
 
 ## Monitoring

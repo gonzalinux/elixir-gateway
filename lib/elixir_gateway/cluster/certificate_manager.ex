@@ -3,12 +3,16 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   Manages certificate synchronization across the distributed cluster.
 
   Architecture:
-  - Primary node: Generates certificates via SiteEncrypt, broadcasts to peers
-  - Secondary nodes: Receive certificates via distributed Erlang RPC, validate and install
+  - Primary node: Generates certificates via SiteEncrypt, broadcasts to peers (typically home server)
+  - Secondary nodes: Receive certificates via distributed Erlang RPC, validate and install (typically cloud servers)
 
   Role Determination:
-  1. Auto-detect: Empty CLUSTER_PEERS → Primary, Non-empty → Secondary
-  2. Explicit override: IS_PRIMARY env var (true/false)
+  1. Explicit: IS_PRIMARY env var (true/false)
+  2. Auto-detect: DNS failover enabled → Primary (manages DNS), otherwise Secondary
+
+  Typical Setup:
+  - Primary (home server): Manages DNS failover, generates certs, knows peer IPs, CLUSTER_PEERS="cloud-a@ip:port,cloud-b@ip:port"
+  - Secondary (cloud servers): Accept connections, receive certs, CLUSTER_PEERS="" (empty)
 
   Certificate Flow:
   Primary: SiteEncrypt generates → handle_new_cert callback → broadcast_certificates
@@ -235,14 +239,16 @@ defmodule ElixirGateway.Cluster.CertificateManager do
         :secondary
 
       _ ->
-        # 2. Auto-detect from peers list
-        peers = Keyword.get(cluster_config, :peers, [])
+        # 2. Auto-detect from DNS failover configuration
+        # Primary manages DNS (typically home server), secondary just accepts connections (cloud)
+        dns_config = Keyword.get(cluster_config, :dns_failover, [])
+        domains = Keyword.get(dns_config, :domains, [])
 
-        if peers == [] do
-          Logger.info("Role: Primary (auto-detected: empty CLUSTER_PEERS)")
+        if domains != [] and Keyword.get(dns_config, :enabled, false) do
+          Logger.info("Role: Primary (auto-detected: DNS failover enabled)")
           :primary
         else
-          Logger.info("Role: Secondary (auto-detected: non-empty CLUSTER_PEERS)")
+          Logger.info("Role: Secondary (auto-detected: no DNS failover)")
           :secondary
         end
     end
