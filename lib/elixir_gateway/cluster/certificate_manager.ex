@@ -31,16 +31,16 @@ defmodule ElixirGateway.Cluster.CertificateManager do
           generated_at: DateTime.t()
         }
 
-  @rpc_timeout 30_000
   @sync_retry_base_delay 1_000
-  @max_sync_retries 3
 
   defstruct [
     :role,
     :cert_sync_enabled,
     :db_folder,
     :last_sync,
-    :sync_failures
+    :sync_failures,
+    :rpc_timeout,
+    :max_sync_retries
   ]
 
   ## Client API
@@ -68,7 +68,8 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   """
   @spec receive_certificates(cert_bundle()) :: :ok | {:error, term()}
   def receive_certificates(cert_bundle) do
-    GenServer.call(__MODULE__, {:receive_certificates, cert_bundle}, @rpc_timeout)
+    timeout = get_rpc_timeout()
+    GenServer.call(__MODULE__, {:receive_certificates, cert_bundle}, timeout)
   end
 
   @doc """
@@ -84,7 +85,8 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   """
   @spec trigger_sync(domain :: String.t()) :: :ok | {:error, term()}
   def trigger_sync(domain) do
-    GenServer.call(__MODULE__, {:trigger_sync, domain}, @rpc_timeout)
+    timeout = get_rpc_timeout()
+    GenServer.call(__MODULE__, {:trigger_sync, domain}, timeout)
   end
 
   ## Server Callbacks
@@ -98,13 +100,17 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     role = determine_role(cluster_config)
 
     db_folder = get_cert_db_folder()
+    rpc_timeout = Keyword.get(cert_sync_config, :rpc_timeout, 30_000)
+    max_retries = Keyword.get(cert_sync_config, :max_retries, 3)
 
     state = %__MODULE__{
       role: role,
       cert_sync_enabled: enabled,
       db_folder: db_folder,
       last_sync: nil,
-      sync_failures: 0
+      sync_failures: 0,
+      rpc_timeout: rpc_timeout,
+      max_sync_retries: max_retries
     }
 
     if enabled do
@@ -187,7 +193,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   @impl true
   def handle_info({:retry_broadcast, domain}, state) do
-    if state.sync_failures < @max_sync_retries do
+    if state.sync_failures < state.max_sync_retries do
       Logger.info("Retrying certificate broadcast (attempt #{state.sync_failures + 1})")
 
       case broadcast_certificates(domain, state) do
@@ -206,6 +212,12 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   end
 
   ## Private Functions
+
+  defp get_rpc_timeout do
+    cluster_config = Application.get_env(:elixirgateway, :cluster, [])
+    cert_sync_config = Keyword.get(cluster_config, :cert_sync, [])
+    Keyword.get(cert_sync_config, :rpc_timeout, 30_000)
+  end
 
   defp calculate_backoff(attempt) do
     Utils.exponential_backoff(attempt, base_delay: @sync_retry_base_delay)
@@ -254,7 +266,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
       else
         results =
           Enum.map(peers, fn peer ->
-            broadcast_to_peer(peer, cert_bundle)
+            broadcast_to_peer(peer, cert_bundle, state.rpc_timeout)
           end)
 
         # Check if all succeeded
@@ -344,7 +356,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     {:ok, []}
   end
 
-  defp broadcast_to_peer(peer_node, cert_bundle) do
+  defp broadcast_to_peer(peer_node, cert_bundle, rpc_timeout) do
     Logger.debug("Sending certificates to #{peer_node}")
 
     try do
@@ -354,7 +366,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
              __MODULE__,
              :receive_certificates,
              [cert_bundle],
-             @rpc_timeout
+             rpc_timeout
            ) do
         :ok ->
           Logger.info("Successfully synced certificates to #{peer_node}")
