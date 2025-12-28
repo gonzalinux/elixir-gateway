@@ -28,28 +28,48 @@ defmodule :ssl_psk do
   - `{:ok, binary()}` - The decoded secret as binary
   - `:error` - If the secret is invalid or missing
   """
-  def lookup(:psk, _psk_id, _user_state) do
+  def lookup(:psk, psk_id, _user_state) do
+    Logger.info("PSK lookup called - PSK ID: #{inspect(psk_id)}")
+
     case System.get_env("CLUSTER_SECRET") do
       nil ->
-        Logger.error("PSK authentication failed: no secret was found")
+        Logger.error("✗ PSK authentication failed: CLUSTER_SECRET environment variable not set")
         :error
 
       secret when is_binary(secret) ->
-        validate_and_decode_secret(secret)
+        Logger.debug("PSK secret found, validating...")
+        result = validate_and_decode_secret(secret)
+
+        case result do
+          {:ok, _bytes} ->
+            Logger.info("✓ PSK authentication successful")
+
+          :error ->
+            Logger.error("✗ PSK validation failed")
+        end
+
+        result
     end
   end
 
   defp validate_and_decode_secret(secret) do
+    secret_preview = String.slice(secret, 0, 8) <> "..."
+    Logger.debug("Validating secret (preview: #{secret_preview}, length: #{String.length(secret)})")
+
     case Base.decode16(secret, case: :mixed) do
       {:ok, bytes} when byte_size(bytes) >= @min_secret_bytes ->
+        Logger.debug("Secret valid: #{byte_size(bytes)} bytes")
         {:ok, bytes}
 
-      {:ok, _bytes} ->
-        Logger.error("PSK authentication failed: the secret is less than #{@min_secret_bytes}")
+      {:ok, bytes} ->
+        Logger.error(
+          "PSK authentication failed: secret too short (#{byte_size(bytes)} bytes, need >= #{@min_secret_bytes})"
+        )
+
         :error
 
       :error ->
-        Logger.error("PSK authentication failed: the secret could not be decoded")
+        Logger.error("PSK authentication failed: secret is not valid hex (got: #{secret_preview})")
         :error
     end
   end

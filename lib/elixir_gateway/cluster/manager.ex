@@ -101,6 +101,14 @@ defmodule ElixirGateway.Cluster.Manager do
     listen_port = Keyword.get(config, :listen_port, @default_listen_port)
     heartbeat_interval = Keyword.get(config, :heartbeat_interval, @default_heartbeat_interval)
 
+    Logger.info("=" <> String.duplicate("=", 60))
+    Logger.info("Cluster Configuration:")
+    Logger.info("  Node name: #{node_name}")
+    Logger.info("  Listen port: #{listen_port}")
+    Logger.info("  Configured peers: #{inspect(peers)}")
+    Logger.info("  Secret configured: #{if secret != "", do: "YES (#{String.length(secret)} chars)", else: "NO"}")
+    Logger.info("=" <> String.duplicate("=", 60))
+
     # Configure and start Erlang distribution
     start_distribution(node_name, secret, listen_port)
 
@@ -272,6 +280,13 @@ defmodule ElixirGateway.Cluster.Manager do
     # Validate secret
     validate_secret!(secret)
 
+    # Enable SSL debug logging if requested
+    if System.get_env("SSL_DEBUG") == "true" do
+      Logger.warning("SSL_DEBUG enabled - verbose TLS handshake logging active")
+      :ssl.start()
+      :application.set_env(:ssl, :log_level, :debug)
+    end
+
     # Check if node is already running in distributed mode
     # (started by VM with --name flag and TLS options)
     if Node.alive?() do
@@ -333,17 +348,26 @@ defmodule ElixirGateway.Cluster.Manager do
     # Parse peer address: "node_name@host:port"
     # With EPMD, the port is registered and auto-discovered
     case String.split(peer_address, ["@", ":"]) do
-      [node_name, host, _port_str] ->
+      [node_name, host, port_str] ->
         # EPMD will look up the port automatically
         peer_node = String.to_atom("#{node_name}@#{host}")
 
+        Logger.info("Attempting to connect to peer: #{peer_node} (port: #{port_str})")
+        Logger.debug("Connection details - Node: #{inspect(Node.self())}, Target: #{inspect(peer_node)}")
+
         case Node.connect(peer_node) do
           true ->
-            Logger.info("Connected to peer: #{peer_address}")
+            Logger.info("✓ Successfully connected to peer: #{peer_address}")
             :ok
 
           false ->
-            Logger.warning("Failed to connect to peer #{peer_address}")
+            Logger.warning("✗ Failed to connect to peer #{peer_address}")
+            Logger.warning("  Possible causes:")
+            Logger.warning("  - Peer node not running")
+            Logger.warning("  - Network connectivity issue")
+            Logger.warning("  - Firewall blocking port #{port_str}")
+            Logger.warning("  - TLS/PSK authentication failure")
+            Logger.warning("  - CLUSTER_SECRET mismatch")
             {:error, :connection_failed}
 
           :ignored ->
