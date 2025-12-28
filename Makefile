@@ -15,16 +15,16 @@ setup: ## Install dependencies and setup project
 
 run: ## Start the Phoenix server (loads .env if present)
 ifeq ($(OS),Windows_NT)
-	run_server.bat .env
+	script\run_server.bat .env
 else
-	./run_server.sh .env
+	./script/run_server.sh .env
 endif
 
 run2: ## Start the Phoenix server with .env2 configuration
 ifeq ($(OS),Windows_NT)
-	run_server.bat .env2
+	script\run_server.bat .env2
 else
-	./run_server.sh .env2
+	./script/run_server.sh .env2
 endif
 
 install-certbot: ## Install certbot for SSL certificate management

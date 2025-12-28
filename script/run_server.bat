@@ -18,10 +18,31 @@ if exist %ENV_FILE% (
         )
     )
 )
+mix deps.get
+mid compile
 
 REM Check if clustering is enabled
 if "%CLUSTER_ENABLED%"=="true" (
     echo Starting server with clustering enabled...
+
+    REM Auto-detect NODE_IP if not set
+    if not defined NODE_IP (
+        echo NODE_IP not set, attempting auto-detection...
+
+        REM Use the Mix task to detect IP
+        for /f %%i in ('mix elixir_gateway.detect_ip 2^>nul') do set NODE_IP=%%i
+
+        REM If still no IP, fail with helpful message
+        if not defined NODE_IP (
+            echo ERROR: Could not auto-detect NODE_IP.
+            echo Please set NODE_IP explicitly in your %ENV_FILE%:
+            echo   NODE_IP=your.server.ip.address
+            exit /b 1
+        )
+
+        echo Auto-detected NODE_IP: %NODE_IP%
+    )
+
     elixir --name %NODE_NAME%@%NODE_IP% --erl "-proto_dist inet_tls -ssl_dist_optfile %CD%\priv\ssl_dist.conf -kernel inet_dist_listen_min %CLUSTER_PORT% inet_dist_listen_max %CLUSTER_PORT%" -S mix phx.server
 ) else (
     echo Starting server...
