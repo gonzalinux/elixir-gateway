@@ -35,11 +35,10 @@ if [ "$CLUSTER_ENABLED" = "true" ]; then
 
         echo "Auto-detected NODE_IP: $NODE_IP"
     fi
-    echo "${NODE_NAME}_$CLUSTER_PORT@$NODE_IP"
+    echo "Starting node: ${NODE_NAME}_${CLUSTER_PORT}@$NODE_IP"
 
-    elixir --name "$NODE_NAME@$NODE_IP" \
-        --erl "-pa priv/static_epmd -start_epmd false -epmd_module Elixir.StaticEpmd" \
-        --erl "-proto_dist inet_tls -ssl_dist_optfile $(pwd)/priv/ssl_dist.conf -kernel inet_dist_listen_min $CLUSTER_PORT inet_dist_listen_max $CLUSTER_PORT" \
+    elixir --name "${NODE_NAME}_${CLUSTER_PORT}@$NODE_IP" \
+        --erl "-pa priv/static_epmd -start_epmd false -epmd_module Elixir.StaticEpmd -proto_dist inet_tls -ssl_dist_optfile $(pwd)/priv/ssl_dist.conf -kernel inet_dist_listen_min $CLUSTER_PORT inet_dist_listen_max $CLUSTER_PORT" \
         -S mix phx.server
 else
     echo "Starting server..."

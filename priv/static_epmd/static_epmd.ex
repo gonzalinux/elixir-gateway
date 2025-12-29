@@ -75,7 +75,7 @@ defmodule StaticEpmd do
     # e.g. '9200' -> 9200
     try do
       port = :erlang.list_to_integer(port_chars)
-      {:port, port, 5}  # 5 is the protocol version
+      {:port, port, 6}  # 6 is the protocol version for OTP 23+
     rescue
       ArgumentError ->
         :io.format("[StaticEpmd] ERROR: Invalid port format: ~p~n", [port_chars])
@@ -85,6 +85,43 @@ defmodule StaticEpmd do
 
   defp parse_port_charlist(_), do: :noport
 
-  # Fallback for address requests (optional but good for safety)
-  def address_please(_name, _host, _address_family), do: :noport
+
+  # 6. Address Please: Resolves hostname and returns IP + port
+  def address_please(name, host, address_family) when is_list(name) do
+    :io.format("[StaticEpmd] address_please called for: ~s@~s~n", [name, host])
+
+    # First resolve the hostname to an IP
+    case :inet.getaddr(host, address_family) do
+      {:ok, ip} ->
+        :io.format("[StaticEpmd] Resolved ~s to ~p~n", [host, ip])
+
+        # Then get the port from the name
+        parts = split_charlist(name, ?_)
+
+        case parts do
+          [] ->
+            {:error, :nxdomain}
+          parts_list ->
+            port_part = :lists.last(parts_list)
+
+            try do
+              port = :erlang.list_to_integer(port_part)
+              :io.format("[StaticEpmd] Returning: ip=~p port=~p version=6~n", [ip, port])
+              {:ok, ip, port, 6}
+            rescue
+              ArgumentError ->
+                {:error, :nxdomain}
+            end
+        end
+
+      {:error, reason} ->
+        :io.format("[StaticEpmd] Failed to resolve ~s: ~p~n", [host, reason])
+        {:error, reason}
+    end
+  end
+
+  def address_please(name, _host, _address_family) do
+    :io.format("[StaticEpmd] ERROR: Invalid name type in address_please: ~p~n", [name])
+    {:error, :nxdomain}
+  end
 end
