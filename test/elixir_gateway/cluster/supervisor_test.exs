@@ -8,6 +8,31 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     original_config = Application.get_env(:elixirgateway, :cluster)
 
     # Stop supervisor if it's already running before the test and wait for it to terminate
+    stop_supervisor_and_wait()
+
+    on_exit(fn ->
+      # Stop supervisor if it's running
+      stop_supervisor_and_wait()
+
+      # Restore original config or delete if it didn't exist
+      if original_config do
+        Application.put_env(:elixirgateway, :cluster, original_config)
+      else
+        Application.delete_env(:elixirgateway, :cluster)
+      end
+    end)
+
+    :ok
+  end
+
+  defp stop_supervisor_and_wait do
+    # Stop any orphaned cluster processes first (from other tests)
+    stop_cluster_process(ElixirGateway.Cluster.CertificateManager)
+    stop_cluster_process(ElixirGateway.Cluster.Manager)
+    stop_cluster_process(ElixirGateway.Cluster.ConnectionRegistry)
+    stop_cluster_process(ElixirGateway.Cluster.DNSFailover)
+
+    # Now stop the supervisor itself
     case Process.whereis(ClusterSupervisor) do
       nil ->
         :ok
@@ -21,35 +46,48 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
         after
           1000 -> :ok
         end
+
+        # Wait for name to be fully unregistered
+        wait_for_name_unregistered(ClusterSupervisor, 100)
     end
-
-    on_exit(fn ->
-      # Restore original config or delete if it didn't exist
-      if original_config do
-        Application.put_env(:elixirgateway, :cluster, original_config)
-      else
-        Application.delete_env(:elixirgateway, :cluster)
-      end
-
-      # Stop supervisor if it's running
-      case Process.whereis(ClusterSupervisor) do
-        nil ->
-          :ok
-
-        pid ->
-          ref = Process.monitor(pid)
-          Supervisor.stop(pid, :normal)
-
-          receive do
-            {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-          after
-            1000 -> :ok
-          end
-      end
-    end)
-
-    :ok
   end
+
+  defp stop_cluster_process(name) do
+    case Process.whereis(name) do
+      nil ->
+        :ok
+
+      pid ->
+        ref = Process.monitor(pid)
+
+        try do
+          GenServer.stop(pid, :normal, 1000)
+        catch
+          :exit, _ -> :ok
+        end
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+        after
+          1000 -> :ok
+        end
+
+        wait_for_name_unregistered(name, 100)
+    end
+  end
+
+  defp wait_for_name_unregistered(name, retries_left) when retries_left > 0 do
+    case Process.whereis(name) do
+      nil ->
+        :ok
+
+      _pid ->
+        Process.sleep(10)
+        wait_for_name_unregistered(name, retries_left - 1)
+    end
+  end
+
+  defp wait_for_name_unregistered(_name, 0), do: :ok
 
   describe "when clustering is disabled (default)" do
     test "starts successfully with no children" do

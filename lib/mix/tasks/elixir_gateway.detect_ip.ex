@@ -29,19 +29,20 @@ defmodule Mix.Tasks.ElixirGateway.DetectIp do
 
     alias ElixirGateway.Cluster.IPDetection
 
-    ip = case IPDetection.get_public_ip() do
-      {:ok, ip} ->
-        ip
+    ip =
+      case IPDetection.get_public_ip() do
+        {:ok, ip} ->
+          ip
 
-      {:error, _reason} ->
-        case IPDetection.get_local_ip() do
-          {:ok, ip} ->
-            ip
+        {:error, _reason} ->
+          case IPDetection.get_local_ip() do
+            {:ok, ip} ->
+              ip
 
-          {:error, _} ->
-            ""
-        end
-    end
+            {:error, _} ->
+              ""
+          end
+      end
 
     if ip == "" do
       System.halt(1)

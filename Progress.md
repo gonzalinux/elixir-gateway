@@ -6,17 +6,20 @@ This document tracks the implementation of the distributed clustering feature fo
 
 ### ✅ Completed Tasks
 
-#### 1. Dependencies (mix.exs:48-50)
+#### 1. Dependencies (mix.exs:48-51)
 - [x] Configured distributed Erlang for encrypted node distribution
 - [x] Added `{:req, "~> 0.4"}` for HTTP client (DDNS API and public IP detection)
+- [x] Added `{:quantum, "~> 3.5"}` for periodic IP change detection (cron-based scheduling)
 
 #### 2. Core Modules
 - [x] `ElixirGateway.Cluster.Supervisor` - Top-level supervisor; no-op if `enabled: false`
 - [x] `ElixirGateway.Cluster.Manager` - Distributed Erlang setup, peer connection, health heartbeats
 - [x] `ElixirGateway.Cluster.ConnectionRegistry` - Local ETS-based sticky sessions with TTL: `{client_ip, session_id}` → `backend_node`
-- [x] `ElixirGateway.Cluster.DNSFailover` - Monitors peer, triggers DDNS update on failure
+- [x] `ElixirGateway.Cluster.DNSFailover` - Monitors peer health, triggers DDNS update on failure, and handles IP change detection
 - [x] `ElixirGateway.Cluster.DDNS.Namecheap` - DDNS client (same protocol as ddclient)
 - [x] `ElixirGateway.Cluster.Secret` - Helper module for secret generation and validation
+- [x] `ElixirGateway.Scheduler` - Quantum scheduler for periodic tasks
+- [x] `ElixirGateway.Cluster.Jobs.IPChangeDetector` - Periodic job that detects public IP changes (every 5 minutes)
 
 #### 3. Mix Tasks
 - [x] `Mix.Tasks.ElixirGateway.Gen.ClusterSecret` - Secret generator task

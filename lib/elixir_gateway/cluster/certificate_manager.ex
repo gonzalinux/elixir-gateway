@@ -239,16 +239,16 @@ defmodule ElixirGateway.Cluster.CertificateManager do
         :secondary
 
       _ ->
-        # 2. Auto-detect from DNS failover configuration
-        # Primary manages DNS (typically home server), secondary just accepts connections (cloud)
-        dns_config = Keyword.get(cluster_config, :dns_failover, [])
-        domains = Keyword.get(dns_config, :domains, [])
+        # 2. Auto-detect from peers configuration
+        # Primary (home server with dynamic IP) knows about cloud servers and has peers configured
+        # Secondary (cloud servers with static IP) accepts connections and has no peers
+        peers = Keyword.get(cluster_config, :peers, [])
 
-        if domains != [] and Keyword.get(dns_config, :enabled, false) do
-          Logger.info("Role: Primary (auto-detected: DNS failover enabled)")
+        if peers != [] do
+          Logger.info("Role: Primary (auto-detected: peers configured)")
           :primary
         else
-          Logger.info("Role: Secondary (auto-detected: no DNS failover)")
+          Logger.info("Role: Secondary (auto-detected: no peers configured)")
           :secondary
         end
     end

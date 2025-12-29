@@ -246,12 +246,12 @@ defmodule ElixirGateway.Cluster.Manager do
           {:noreply, state}
 
         false ->
-          Logger.debug("Reconnection to #{peer_node} failed, will retry")
+          Logger.info("Reconnection to #{peer_node} failed, will retry")
           schedule_reconnect(peer_node)
           {:noreply, state}
 
         :ignored ->
-          Logger.debug("Node #{peer_node} already connected")
+          Logger.info("Node #{peer_node} already connected")
           {:noreply, state}
       end
     else

@@ -49,12 +49,9 @@ defmodule ElixirGateway.Cluster.IPDetection do
       "127.0.0.1" ->
         {:error, "Only loopback interface found"}
 
-      ip when is_binary(ip) ->
+      ip ->
         Logger.debug("Detected local IP: #{ip}")
         {:ok, ip}
-
-      _ ->
-        {:error, "Could not detect local IP"}
     end
   end
 

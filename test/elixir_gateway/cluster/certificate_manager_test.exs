@@ -34,14 +34,14 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
   end
 
   describe "role determination" do
-    test "detects primary when CLUSTER_PEERS is empty" do
+    test "detects primary when CLUSTER_PEERS has values" do
       System.delete_env("IS_PRIMARY")
 
       Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-primary",
-        peers: []
+        peers: ["peer:9100"]
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -52,14 +52,14 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
       GenServer.stop(pid)
     end
 
-    test "detects secondary when CLUSTER_PEERS has values" do
+    test "detects secondary when CLUSTER_PEERS is empty" do
       System.delete_env("IS_PRIMARY")
 
       Application.put_env(:elixirgateway, :cluster,
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-secondary",
-        peers: ["peer:9100"]
+        peers: []
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -77,7 +77,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-override-primary",
-        peers: ["peer:9100"]
+        peers: []
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -96,7 +96,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-override-secondary",
-        peers: []
+        peers: ["peer:9100"]
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -117,7 +117,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-checksum",
-        peers: ["peer:9100"]
+        peers: []
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -146,7 +146,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-install",
-        peers: ["peer:9100"]
+        peers: []
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -192,7 +192,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-primary-reject",
-        peers: []
+        peers: ["peer:9100"]
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -223,7 +223,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-status-primary",
-        peers: []
+        peers: ["peer:9100"]
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -248,7 +248,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-status-secondary",
-        peers: ["peer:9100"]
+        peers: []
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -293,7 +293,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-trigger-primary",
-        peers: []
+        peers: ["peer:9100"]
       )
 
       {:ok, pid} = CertificateManager.start_link([])
@@ -307,7 +307,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
       File.write!(Path.join(cert_dir, "privkey.pem"), "KEY")
       File.write!(Path.join(cert_dir, "chain.pem"), "CHAIN")
 
-      # Trigger sync (will fail since no peers, but shouldn't crash)
+      # Trigger sync (will fail since no actual peers connected, but shouldn't crash)
       result = CertificateManager.trigger_sync(domain)
       assert :ok = result
 
@@ -322,7 +322,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         enabled: true,
         secret: String.duplicate("a", 64),
         node_name: "test-trigger-secondary",
-        peers: ["peer:9100"]
+        peers: []
       )
 
       {:ok, pid} = CertificateManager.start_link([])
