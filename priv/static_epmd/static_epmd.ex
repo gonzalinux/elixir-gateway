@@ -85,7 +85,6 @@ defmodule StaticEpmd do
 
   defp parse_port_charlist(_), do: :noport
 
-
   # 6. Address Please: Resolves hostname and returns IP + port
   def address_please(name, host, address_family) when is_list(name) do
     :io.format("[StaticEpmd] address_please called for: ~s@~s~n", [name, host])
