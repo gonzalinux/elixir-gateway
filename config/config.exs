@@ -112,6 +112,18 @@ config :elixirgateway, :cluster,
     domains: []
   ]
 
+# Configure Quantum scheduler for periodic tasks
+config :elixirgateway, ElixirGateway.Scheduler,
+  jobs: [
+    # Periodic IP change detection (runs every 5 minutes like ddclient)
+    # Only runs when clustering and DNS failover are enabled
+    ip_change_detector: [
+      schedule: "*/5 * * * *",
+      task: {ElixirGateway.Cluster.Jobs.IPChangeDetector, :check_ip_change, []},
+      run_strategy: Quantum.RunStrategy.Local
+    ]
+  ]
+
 config :elixirgateway, env: config_env()
 
 # Import environment specific config. This must remain at the bottom
