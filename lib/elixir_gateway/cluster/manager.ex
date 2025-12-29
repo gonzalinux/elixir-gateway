@@ -272,10 +272,17 @@ defmodule ElixirGateway.Cluster.Manager do
     # Validate secret
     validate_secret!(secret)
 
+    # Derive Erlang cookie from cluster secret
+    # All nodes with the same CLUSTER_SECRET will have the same cookie
+    cookie = derive_cookie_from_secret(secret)
+
     # Check if node is already running in distributed mode
     # (started by VM with --name flag and TLS options)
     if Node.alive?() do
       current_node = Node.self()
+
+      # Set cookie even if node was started externally
+      Node.set_cookie(current_node, cookie)
 
       Logger.info(
         "Distributed node already running: #{current_node} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
@@ -302,6 +309,9 @@ defmodule ElixirGateway.Cluster.Manager do
       # Start node in distributed mode with longnames
       case Node.start(full_node_name, :longnames, 15000) do
         {:ok, _} ->
+          # Set cookie after node starts
+          Node.set_cookie(full_node_name, cookie)
+
           Logger.info(
             "Started distributed node: #{full_node_name} on port #{listen_port} (TLS 1.2 PSK-DHE Enabled)"
           )
@@ -327,6 +337,18 @@ defmodule ElixirGateway.Cluster.Manager do
       :error ->
         raise ArgumentError, "Cluster secret must be a valid hex string"
     end
+  end
+
+  defp derive_cookie_from_secret(secret) do
+    # Derive a deterministic cookie from the cluster secret
+    # All nodes with the same secret will have the same cookie
+    # Using SHA-256 hash of the secret to create a cookie atom
+    hash =
+      :crypto.hash(:sha256, secret)
+      |> Base.encode16(case: :lower)
+      |> String.slice(0, 64)
+
+    String.to_atom("cluster_" <> hash)
   end
 
   defp connect_to_peer(peer_address) do
