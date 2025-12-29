@@ -113,6 +113,42 @@ end
 - Environment-based configuration (dev/staging/prod)
 - Manual SSL configuration support
 
+#### Distributed Cluster SSL Behavior
+**IMPORTANT:** Certificate challenges are role-aware to prevent multiple nodes from attempting Let's Encrypt ACME challenges:
+
+- **Primary nodes** (`IS_PRIMARY` not set, or peers configured):
+  - Run SiteEncrypt with full ACME challenge capability
+  - Generate Let's Encrypt certificates automatically
+  - Broadcast certificates to secondary nodes via Erlang RPC
+
+- **Secondary nodes** (`IS_PRIMARY=false`):
+  - Run SiteEncrypt in **manual mode** with empty domains
+  - **DO NOT** attempt ACME challenges (prevents rate limiting issues)
+  - Receive certificates from primary via `CertificateManager` cluster sync
+  - Certificates written to same `SITE_ENCRYPT_DB` path and loaded automatically
+
+**Role Detection:**
+1. Explicit: `IS_PRIMARY=false` → Secondary (receives certs)
+2. Auto-detect: `CLUSTER_PEERS` configured → Primary (generates certs)
+3. Default (no clustering): Primary (generates certs)
+
+**Configuration:**
+```bash
+# Primary node (home server)
+export CLUSTER_PEERS="cloud-a@ip:port,cloud-b@ip:port"
+# IS_PRIMARY is implicitly true
+
+# Secondary node (cloud server)
+export IS_PRIMARY=false
+export CLUSTER_PEERS=""  # Empty, accepts connections
+```
+
+**Why This Matters:** Without this protection, all nodes would independently attempt ACME challenges, causing:
+- Race conditions for HTTP-01 challenges
+- Let's Encrypt rate limit exhaustion (5 failed authorizations/hour)
+- Certificate sync becoming ineffective
+- Deployment failures in containerized environments with independent storage
+
 ### WebSocket Architecture
 - Transparent proxying with session preservation
 - Header transformation and forwarding
