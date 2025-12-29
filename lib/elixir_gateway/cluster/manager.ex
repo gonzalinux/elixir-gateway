@@ -286,7 +286,7 @@ defmodule ElixirGateway.Cluster.Manager do
       # Not running in distributed mode - try to start it
       # This path is used when running without --name flag
       node_ip = get_node_ip()
-      full_node_name = String.to_atom("#{node_name}@#{node_ip}")
+      full_node_name = String.to_atom("#{node_name}_#{listen_port}@#{node_ip}")
 
       # Set SSL dist config file path
       ssl_conf_path = Path.join(:code.priv_dir(:elixirgateway), "ssl_dist.conf")
@@ -331,10 +331,12 @@ defmodule ElixirGateway.Cluster.Manager do
 
   defp connect_to_peer(peer_address) do
     # Parse peer address: "node_name@host:port"
-    # The port is resolved by our custom FixedPortEpmd module
+
     case String.split(peer_address, ["@", ":"]) do
       [node_name, host, port_str] ->
-        peer_node = String.to_atom("#{node_name}@#{host}")
+        # The port is sent with the name so our custom StaticEpmd module can use it.
+        # It cant go in the host as it needs to be an ip or a domain name ONLY.
+        peer_node = String.to_atom("#{node_name}_#{port_str}@#{host}")
 
         Logger.info("Attempting to connect to peer: #{peer_node} (port: #{port_str})")
 

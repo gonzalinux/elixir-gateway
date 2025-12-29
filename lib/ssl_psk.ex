@@ -61,7 +61,7 @@ defmodule :ssl_psk do
         Logger.debug("Secret valid: #{byte_size(bytes)} bytes")
         {:ok, bytes}
 
-      {:ok, bytes} ->
+      {:ok, _bytes} ->
         Logger.error("PSK authentication failed: the secret is less than #{@min_secret_bytes}")
 
         :error
