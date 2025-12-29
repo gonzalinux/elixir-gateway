@@ -12,6 +12,7 @@ defmodule ElixirGateway.SiteEncrypt do
         case Mix.env() do
           # Provide dummy domain for tests
           :test -> ["localhost"]
+          :dev -> ["dev.example.com"]
           _ -> []
         end
 
@@ -29,6 +30,7 @@ defmodule ElixirGateway.SiteEncrypt do
         case Mix.env() do
           # Provide dummy email for tests
           :test -> "test@example.com"
+          :dev -> "test@example.com"
           _ -> nil
         end
 

@@ -8,7 +8,7 @@ Complete configuration and deployment instructions for Elixir-Gateway.
 Edit your configuration file to map domains to internal services:
 
 ```elixir
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   services: %{
     "api.example.com" => "http://192.168.1.10:8080",
     "admin.example.com" => "https://192.168.1.11:8443"
@@ -30,12 +30,6 @@ Elixir-Gateway automatically handles SSL certificates in production:
 - Self-signed certificates generated automatically for development/testing
 - No external dependencies required
 - Works out-of-the-box in containerized environments
-
-**Optional Configuration**:
-```bash
-# Set custom certificate storage path
-export CERT_DB_FOLDER="/etc/elixirgateway/certs"
-```
 
 #### Development: Auto-generated Certificates
 In development, SSL certificates are automatically generated - no configuration needed.
@@ -81,7 +75,7 @@ Available metrics:
 ### Rate Limiting
 Configure rate limits per user:
 ```elixir
-config :elixir_gateway, :gateway,
+config :elixirgateway, :gateway,
   rate_limit: [
     requests_per_minute: 100,
     cleanup_interval: :timer.minutes(1)
@@ -101,9 +95,10 @@ config :elixir_gateway, :gateway,
 # Generate a secret key for production
 export SECRET_KEY_BASE=$(mix phx.gen.secret)
 
-# Optional: Set custom host and port
+# Optional: Set custom host and ports
 export PHX_HOST="yourdomain.com"
-export PORT="4442"
+export HTTP_PORT="4000"
+export HTTPS_PORT="4001"
 
 # For Let's Encrypt SSL
 export LETSENCRYPT_DOMAINS="api.yourdomain.com,service1.yourdomain.com"
@@ -116,10 +111,9 @@ export LETSENCRYPT_EMAIL="admin@yourdomain.com"
 |----------|-------------|---------|----------|
 | `SECRET_KEY_BASE` | Secret key for signing cookies and tokens | `mix phx.gen.secret` | Yes (prod) |
 | `PHX_HOST` | Host for the Phoenix endpoint | `api.yourdomain.com` | Yes (prod) |
-| `PORT` | HTTP port for the server | `4000` | Optional (default: 4442) |
-| `PHX_SERVER` | Enable Phoenix server | `true` | Optional |
+| `HTTP_PORT` | HTTP port for ACME challenges | `4000` | Optional (default: 4004 dev, 4000 prod) |
+| `HTTPS_PORT` | HTTPS port for secure traffic | `4001` | Optional (default: 4003 dev, 4001 prod) |
 | `DNS_CLUSTER_QUERY` | DNS cluster query for distributed deployment | `api.cluster.local` | Optional |
-| `CERT_DB_FOLDER` | SSL certificate storage path | `/etc/ssl/certs` | Optional |
 | `LETSENCRYPT_DOMAINS` | Domains for SSL certificates | `api.example.com,app.example.com` | Required for SSL |
 | `LETSENCRYPT_EMAIL` | Email for Let's Encrypt registration | `admin@example.com` | Required for SSL |
 | `LETSENCRYPT_STAGING` | Use Let's Encrypt staging environment | `true` | Optional |

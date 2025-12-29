@@ -8,6 +8,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   @behaviour WebSock
 
   alias ElixirGatewayWeb.WebSocketConnectionPool
+  alias ElixirGateway.Utils
 
   # Default configuration
   @default_config %{
@@ -385,13 +386,14 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   defp schedule_reconnect(state) do
     new_attempts = state.reconnect_attempts + 1
 
-    # Exponential backoff with jitter
-    base_delay = state.config.reconnect_base_delay
-    max_delay = state.config.reconnect_max_delay
-
-    delay = min(base_delay * :math.pow(2, new_attempts - 1), max_delay)
-    jitter = :rand.uniform(1000)
-    final_delay = trunc(delay) + jitter
+    # Exponential backoff with fixed jitter and max delay
+    final_delay =
+      Utils.exponential_backoff(
+        new_attempts - 1,
+        base_delay: state.config.reconnect_base_delay,
+        max_delay: state.config.reconnect_max_delay,
+        jitter: :fixed
+      )
 
     Logger.info("Scheduling reconnection attempt #{new_attempts} in #{final_delay}ms")
 

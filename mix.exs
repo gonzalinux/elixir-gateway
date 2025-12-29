@@ -5,7 +5,7 @@ defmodule ElixirGateway.MixProject do
     [
       app: :elixirgateway,
       version: "0.1.0",
-      elixir: "~> 1.14",
+      elixir: "~> 1.16",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -19,7 +19,8 @@ defmodule ElixirGateway.MixProject do
   def application do
     [
       mod: {ElixirGateway.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools],
+      included_applications: [:syn]
     ]
   end
 
@@ -43,8 +44,11 @@ defmodule ElixirGateway.MixProject do
       {:hammer, "~> 6.1"},
       {:finch, "~> 0.19"},
       {:prom_ex, "~> 1.9"},
-      {:site_encrypt, "~> 0.6"},
+      {:site_encrypt, "~> 0.7"},
       {:gun, "~> 2.0"},
+      {:syn, "~> 3.3"},
+      {:req, "~> 0.4"},
+      {:quantum, "~> 3.5"},
       {:tidewave, "~> 0.1", only: :dev},
       {:bypass, "~> 2.1", only: :test},
       {:mock, "~> 0.3.0", only: :test}
@@ -59,7 +63,7 @@ defmodule ElixirGateway.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get"]
+      setup: ["deps.get", "compile"]
     ]
   end
 end

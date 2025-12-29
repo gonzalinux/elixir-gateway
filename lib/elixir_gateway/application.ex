@@ -7,18 +7,49 @@ defmodule ElixirGateway.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      ElixirGateway.PromEx,
-      ElixirGatewayWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:elixirgateway, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: ElixirGateway.PubSub},
-      # Start Finch for HTTP client
-      {Finch, name: ElixirGateway.Finch},
-      # Start WebSocket connection pool
-      ElixirGatewayWeb.WebSocketConnectionPool,
-      # Start to serve requests, typically the last entry
-      ElixirGatewayWeb.Endpoint
-    ]
+    # Filter out notice level logs (typically OTP internals like syn)
+    filter_fn = fn log_event, _extra ->
+      case log_event do
+        # Block all notice level logs
+        %{level: :notice} ->
+          :stop
+
+        # Allow everything else
+        _ ->
+          :ignore
+      end
+    end
+
+    # Add filter at both primary and handler level
+    :logger.add_primary_filter(:filter_notice_logs, {filter_fn, []})
+    :logger.add_handler_filter(:default, :filter_notice_logs, {filter_fn, []})
+
+    # Optionally include cluster supervisor (excluded in test mode where tests manage it manually)
+    cluster_supervisor =
+      if Application.get_env(:elixirgateway, :start_cluster_supervisor, true) do
+        [{ElixirGateway.Cluster.Supervisor, []}]
+      else
+        []
+      end
+
+    children =
+      [
+        ElixirGateway.PromEx,
+        ElixirGatewayWeb.Telemetry,
+        {DNSCluster, query: Application.get_env(:elixirgateway, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: ElixirGateway.PubSub},
+        # Start Finch for HTTP client
+        {Finch, name: ElixirGateway.Finch},
+        # Start WebSocket connection pool
+        ElixirGatewayWeb.WebSocketConnectionPool
+      ] ++
+        cluster_supervisor ++
+        [
+          # Start scheduler for periodic tasks (IP change detection, etc.)
+          ElixirGateway.Scheduler,
+          # Start to serve requests, typically the last entry
+          ElixirGatewayWeb.Endpoint
+        ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

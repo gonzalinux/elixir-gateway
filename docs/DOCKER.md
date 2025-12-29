@@ -72,10 +72,9 @@ export PHX_HOST="api.yourdomain.com"
 # SSL Configuration
 export LETSENCRYPT_DOMAINS="api.yourdomain.com,app.yourdomain.com"
 export LETSENCRYPT_EMAIL="admin@yourdomain.com"
-export CERT_DB_FOLDER="/etc/elixirgateway/certs"
 
 # Optional
-export PORT="4000"
-export PHX_SERVER="true"
+export HTTP_PORT="4000"
+export HTTPS_PORT="4001"
 export DNS_CLUSTER_QUERY="api.cluster.local"
 ```

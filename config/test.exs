@@ -25,3 +25,6 @@ config :logger, level: :warning
 
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
+
+# Disable auto-start of cluster supervisor in tests (tests will manage it manually)
+config :elixirgateway, :start_cluster_supervisor, false

@@ -24,7 +24,7 @@ A high-performance API Gateway built with Phoenix that provides domain-based rou
 
 2. **Configure services** in `config/dev.exs`:
    ```elixir
-   config :elixir_gateway, :gateway,
+   config :elixirgateway, :gateway,
      services: %{
        "api.yourdomain.com" => "http://192.168.1.10:8080",
        "app.yourdomain.com" => "https://192.168.1.11:4000"
@@ -39,6 +39,7 @@ A high-performance API Gateway built with Phoenix that provides domain-based rou
 ## Documentation
 
 - [Setup Guide](docs/SETUP.md) - Complete configuration and deployment guide
+- [Clustering Guide](docs/CLUSTERING.md) - High availability clustering with automatic failover
 - [Let's Encrypt Setup](docs/LETSENCRYPT_SETUP.md) - Automatic SSL certificate management
 - [WebSocket Proxy Architecture](docs/WebSocket_Proxy_Architecture.md) - WebSocket proxying details
 - [Phoenix Deployment Guide](https://hexdocs.pm/phoenix/deployment.html) - Creating releases for production

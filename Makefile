@@ -13,8 +13,19 @@ install: ## Install dependencies only
 setup: ## Install dependencies and setup project
 	mix setup
 
-run: ## Start the Phoenix server
-	mix phx.server
+run: ## Start the Phoenix server (loads .env if present)
+ifeq ($(OS),Windows_NT)
+	script\run_server.bat .env
+else
+	./script/run_server.sh .env
+endif
+
+run2: ## Start the Phoenix server with .env2 configuration
+ifeq ($(OS),Windows_NT)
+	script\run_server.bat .env2
+else
+	./script/run_server.sh .env2
+endif
 
 install-certbot: ## Install certbot for SSL certificate management
 	@echo "Installing certbot via snap..."

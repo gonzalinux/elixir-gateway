@@ -75,8 +75,8 @@ USER gateway
 # Set environment variables
 ENV HOME=/app
 ENV MIX_ENV=prod
-ENV PORT=4000
-ENV PHX_SERVER=true
+ENV HTTP_PORT=4000
+ENV HTTPS_PORT=4001
 
 # Expose ports
 EXPOSE 4000 4001 4002
