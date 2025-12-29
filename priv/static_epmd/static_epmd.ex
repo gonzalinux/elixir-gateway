@@ -27,7 +27,7 @@ defmodule StaticEpmd do
 
     result = case parts do
       [] ->
-        :io.format("[StaticEpmd] ERROR: Empty name~n")
+        #:io.format("[StaticEpmd] ERROR: Empty name~n")
         :noport
       parts_list ->
         # Get the last part (should be the port)
@@ -35,7 +35,7 @@ defmodule StaticEpmd do
         parsed = parse_port_charlist(port_part)
 
         # Log for debugging
-        :io.format("[StaticEpmd] Resolving '~s' parts=~p -> ~p~n", [name, parts, parsed])
+        #:io.format("[StaticEpmd] Resolving '~s' parts=~p -> ~p~n", [name, parts, parsed])
         parsed
     end
 
@@ -43,8 +43,8 @@ defmodule StaticEpmd do
   end
 
   # Fallback for non-list input
-  def port_please(name, _ip) do
-    :io.format("[StaticEpmd] ERROR: Invalid name type: ~p~n", [name])
+  def port_please(_name, _ip) do
+    #:io.format("[StaticEpmd] ERROR: Invalid name type: ~p~n", [name])
     :noport
   end
 
@@ -87,12 +87,12 @@ defmodule StaticEpmd do
 
   # 6. Address Please: Resolves hostname and returns IP + port
   def address_please(name, host, address_family) when is_list(name) do
-    :io.format("[StaticEpmd] address_please called for: ~s@~s~n", [name, host])
+    # :io.format("[StaticEpmd] address_please called for: ~s@~s~n", [name, host])
 
     # First resolve the hostname to an IP
     case :inet.getaddr(host, address_family) do
       {:ok, ip} ->
-        :io.format("[StaticEpmd] Resolved ~s to ~p~n", [host, ip])
+        #:io.format("[StaticEpmd] Resolved ~s to ~p~n", [host, ip])
 
         # Then get the port from the name
         parts = split_charlist(name, ?_)
@@ -105,7 +105,7 @@ defmodule StaticEpmd do
 
             try do
               port = :erlang.list_to_integer(port_part)
-              :io.format("[StaticEpmd] Returning: ip=~p port=~p version=6~n", [ip, port])
+              #:io.format("[StaticEpmd] Returning: ip=~p port=~p version=6~n", [ip, port])
               {:ok, ip, port, 6}
             rescue
               ArgumentError ->
@@ -114,13 +114,13 @@ defmodule StaticEpmd do
         end
 
       {:error, reason} ->
-        :io.format("[StaticEpmd] Failed to resolve ~s: ~p~n", [host, reason])
+        #:io.format("[StaticEpmd] Failed to resolve ~s: ~p~n", [host, reason])
         {:error, reason}
     end
   end
 
-  def address_please(name, _host, _address_family) do
-    :io.format("[StaticEpmd] ERROR: Invalid name type in address_please: ~p~n", [name])
+  def address_please(_name, _host, _address_family) do
+    #:io.format("[StaticEpmd] ERROR: Invalid name type in address_please: ~p~n", [name])
     {:error, :nxdomain}
   end
 end

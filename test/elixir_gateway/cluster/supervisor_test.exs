@@ -10,9 +10,15 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
     # Stop supervisor if it's already running before the test and wait for it to terminate
     stop_supervisor_and_wait()
 
+    # Extra delay to ensure full cleanup in CI environments
+    Process.sleep(50)
+
     on_exit(fn ->
       # Stop supervisor if it's running
       stop_supervisor_and_wait()
+
+      # Extra delay to ensure full cleanup in CI environments
+      Process.sleep(50)
 
       # Restore original config or delete if it didn't exist
       if original_config do
@@ -39,16 +45,33 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
 
       pid ->
         ref = Process.monitor(pid)
-        Supervisor.stop(pid, :normal)
 
+        # Try normal stop first
+        try do
+          Supervisor.stop(pid, :normal, 1000)
+        catch
+          :exit, _ -> :ok
+        end
+
+        # Wait for process to die
         receive do
           {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
         after
-          1000 -> :ok
+          1000 ->
+            # If still alive, force kill
+            if Process.alive?(pid) do
+              Process.exit(pid, :kill)
+
+              receive do
+                {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+              after
+                500 -> :ok
+              end
+            end
         end
 
-        # Wait for name to be fully unregistered
-        wait_for_name_unregistered(ClusterSupervisor, 100)
+        # Wait for name to be fully unregistered (increased retries for CI)
+        wait_for_name_unregistered(ClusterSupervisor, 200)
     end
   end
 
@@ -69,10 +92,21 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
         receive do
           {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
         after
-          1000 -> :ok
+          1000 ->
+            # Force kill if still alive
+            if Process.alive?(pid) do
+              Process.exit(pid, :kill)
+
+              receive do
+                {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+              after
+                500 -> :ok
+              end
+            end
         end
 
-        wait_for_name_unregistered(name, 100)
+        # Increased retries for CI environments
+        wait_for_name_unregistered(name, 200)
     end
   end
 
@@ -101,7 +135,8 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
       children = Supervisor.which_children(pid)
       assert children == []
 
-      Supervisor.stop(pid, :normal)
+      # Clean up properly and wait for termination
+      stop_supervisor_and_wait()
     end
 
     test "starts successfully with nil config" do
@@ -114,7 +149,8 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
       children = Supervisor.which_children(pid)
       assert children == []
 
-      Supervisor.stop(pid, :normal)
+      # Clean up properly and wait for termination
+      stop_supervisor_and_wait()
     end
   end
 
@@ -187,11 +223,8 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
       # The important part is it doesn't raise ArgumentError
       assert match?({:ok, _}, result) or match?({:error, _}, result)
 
-      # If it started, stop it explicitly to avoid double-stop in on_exit
-      case result do
-        {:ok, pid} -> Supervisor.stop(pid, :normal)
-        _ -> :ok
-      end
+      # Clean up properly and wait for termination
+      stop_supervisor_and_wait()
     end
 
     test "raises error if secret is empty string" do
