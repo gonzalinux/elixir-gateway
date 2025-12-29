@@ -48,6 +48,7 @@ defmodule ElixirGateway.MixProject do
       {:gun, "~> 2.0"},
       {:syn, "~> 3.3"},
       {:req, "~> 0.4"},
+      {:quantum, "~> 3.5"},
       {:tidewave, "~> 0.1", only: :dev},
       {:bypass, "~> 2.1", only: :test},
       {:mock, "~> 0.3.0", only: :test}

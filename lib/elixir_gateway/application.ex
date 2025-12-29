@@ -35,6 +35,8 @@ defmodule ElixirGateway.Application do
       ElixirGatewayWeb.WebSocketConnectionPool,
       # Start cluster supervisor (no-op if clustering disabled)
       {ElixirGateway.Cluster.Supervisor, []},
+      # Start scheduler for periodic tasks (IP change detection, etc.)
+      ElixirGateway.Scheduler,
       # Start to serve requests, typically the last entry
       ElixirGatewayWeb.Endpoint
     ]

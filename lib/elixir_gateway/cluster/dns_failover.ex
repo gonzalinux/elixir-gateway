@@ -65,6 +65,14 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     GenServer.call(__MODULE__, :get_status)
   end
 
+  @doc """
+  Check if the public IP has changed and update DNS if needed.
+  Called periodically by the IP change detector job.
+  """
+  def check_ip_change do
+    GenServer.call(__MODULE__, :check_ip_change)
+  end
+
   ## Server Callbacks
 
   @impl true
@@ -176,6 +184,38 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     }
 
     {:reply, status, state}
+  end
+
+  @impl true
+  def handle_call(:check_ip_change, _from, state) do
+    # Get current public IP
+    case fetch_public_ip() do
+      {:ok, current_ip} ->
+        # Get cached IP (if any)
+        cached_ip =
+          case state.public_ip_cache do
+            {ip, _timestamp} -> ip
+            _ -> nil
+          end
+
+        if current_ip != cached_ip do
+          Logger.info(
+            "Public IP changed: #{cached_ip || "unknown"} → #{current_ip}, updating DNS"
+          )
+
+          # Perform DNS update
+          {_result, updated_state} = perform_dns_update(state)
+
+          {:reply, {:ok, :updated, current_ip}, updated_state}
+        else
+          Logger.debug("Public IP unchanged: #{current_ip}")
+          {:reply, {:ok, :no_change, current_ip}, state}
+        end
+
+      {:error, reason} ->
+        Logger.error("Failed to check IP change: #{inspect(reason)}")
+        {:reply, {:error, reason}, state}
+    end
   end
 
   ## Private Functions
