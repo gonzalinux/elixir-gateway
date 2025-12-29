@@ -6,24 +6,17 @@ Enable two ElixirGateway instances (e.g., home + cloud) to operate as a single l
 
 ## User Experience
 
-```elixir
-# config/runtime.exs — Only needed if user enables clustering
-config :elixirgateway, :cluster,
-  enabled: true,  # Default: false
-  secret: System.get_env("CLUSTER_SECRET"),
-  node_name: System.get_env("NODE_NAME"),
-  listen_port: 9100,
-  peers: ["gateway-b.example.com:9100"],
-  dns_failover: [
-    enabled: true,
-    provider: :namecheap_ddns,
-    public_ip_method: :auto,
-    domains: [
-      %{host: "@", domain: "example.com", password: System.get_env("DDNS_PASS_EXAMPLE_COM")},
-      %{host: "@", domain: "another.org", password: System.get_env("DDNS_PASS_ANOTHER")}
-    ]
-  ]
+```bash
+# .env file
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<your-64-char-hex-secret>
+NODE_NAME=gateway-a
+CLUSTER_PEERS=gateway-b.example.com:9100
+DNS_FAILOVER_ENABLED=true
+DDNS_DOMAINS=@:example.com:pass1,@:another.org:pass2
 ```
+
+Automatically parsed by `config/runtime.exs` into the cluster configuration.
 
 Secret generation:
 ```bash
@@ -218,22 +211,11 @@ config :elixirgateway, :cluster,
     provider: :namecheap_ddns,       # Uses standard DDNS protocol (like ddclient)
     public_ip_method: :auto,         # :auto uses ipify.org, or {:static, "1.2.3.4"}
     domains: [
-      # Each domain has its own DDNS password (from Namecheap dashboard)
-      %{
-        host: "@",                   # @ for root, or subdomain like "api"
-        domain: "example.com",
-        password: System.get_env("DDNS_PASS_EXAMPLE_COM")
-      },
-      %{
-        host: "api",
-        domain: "example.com",
-        password: System.get_env("DDNS_PASS_EXAMPLE_COM")
-      },
-      %{
-        host: "@",
-        domain: "anotherdomain.org",
-        password: System.get_env("DDNS_PASS_ANOTHER")
-      }
+      # Parsed from DDNS_DOMAINS env var (format: host:domain:password,host:domain:password,...)
+      # Example: DDNS_DOMAINS="@:example.com:pass1,api:example.com:pass1,@:another.org:pass2"
+      %{host: "@", domain: "example.com", password: "pass1"},
+      %{host: "api", domain: "example.com", password: "pass1"},
+      %{host: "@", domain: "anotherdomain.org", password: "pass2"}
     ]
   ]
 ```
@@ -303,12 +285,12 @@ services:
   gateway:
     image: elixir-gateway:latest
     environment:
+      - CLUSTER_ENABLED=true
       - CLUSTER_SECRET=same-secret-on-both-nodes
       - NODE_NAME=gateway-a
       - CLUSTER_PEERS=gateway-b@gateway-b.example.com:9100
-      # DDNS passwords from Namecheap dashboard (one per domain)
-      - DDNS_PASS_EXAMPLE_COM=ddns-password-for-example
-      - DDNS_PASS_ANOTHER=ddns-password-for-another
+      - DNS_FAILOVER_ENABLED=true
+      - DDNS_DOMAINS=@:example.com:pass1,@:another.org:pass2
     ports:
       - "80:4000"
       - "443:4001"

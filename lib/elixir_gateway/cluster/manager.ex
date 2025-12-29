@@ -136,7 +136,18 @@ defmodule ElixirGateway.Cluster.Manager do
   @impl true
   def handle_info(:connect_to_peers, state) do
     Enum.each(state.peers, fn peer ->
-      connect_to_peer(peer)
+      case connect_to_peer(peer) do
+        {:ok, _peer_node} ->
+          :ok
+
+        {:error, :invalid_format} ->
+          # Don't retry invalid formats
+          :ok
+
+        {:error, peer_node, _reason} ->
+          # Schedule retry for failed initial connection
+          schedule_reconnect(peer_node)
+      end
     end)
 
     {:noreply, state}
@@ -180,7 +191,7 @@ defmodule ElixirGateway.Cluster.Manager do
     # If peer not in configured list, add it dynamically (for primary nodes)
     final_health =
       if not found do
-        Logger.info("Peer connected (dynamic): #{peer_str}  #{extra}")
+        Logger.info("Peer connected #{peer_str}  #{extra}")
         Map.put(updated_health, peer_str, :healthy)
       else
         updated_health
@@ -225,7 +236,7 @@ defmodule ElixirGateway.Cluster.Manager do
 
     should_reconnect =
       Enum.any?(state.peers, fn peer ->
-        String.contains?(peer, peer_str)
+        transform_peer_address(peer) == {:ok, String.to_atom(peer_str)}
       end)
 
     if should_reconnect do
@@ -354,13 +365,12 @@ defmodule ElixirGateway.Cluster.Manager do
   defp connect_to_peer(peer_address) do
     # Parse peer address: "node_name@host:port"
 
-    case String.split(peer_address, ["@", ":"]) do
-      [node_name, host, port_str] ->
+    case transform_peer_address(peer_address) do
+      {:ok, peer_node} ->
         # The port is sent with the name so our custom StaticEpmd module can use it.
         # It cant go in the host as it needs to be an ip or a domain name ONLY.
-        peer_node = String.to_atom("#{node_name}_#{port_str}@#{host}")
 
-        Logger.info("Attempting to connect to peer: #{peer_node} (port: #{port_str})")
+        Logger.info("Attempting to connect to peer: #{peer_address} (node: #{peer_node})")
 
         Logger.debug(
           "Connection details - Node: #{inspect(Node.self())}, Target: #{inspect(peer_node)}"
@@ -368,16 +378,16 @@ defmodule ElixirGateway.Cluster.Manager do
 
         case Node.connect(peer_node) do
           true ->
-            Logger.info("✓ Successfully connected to peer: #{peer_address}")
-            :ok
+            Logger.info("Successfully connected to peer: #{peer_address}")
+            {:ok, peer_node}
 
           false ->
-            Logger.warning("✗ Failed to connect to peer #{peer_address}")
-            {:error, :connection_failed}
+            Logger.warning("Failed to connect to peer #{peer_address}, will retry...")
+            {:error, peer_node, :connection_failed}
 
           :ignored ->
             Logger.debug("Node #{peer_node} already connected")
-            :ok
+            {:ok, peer_node}
         end
 
       _ ->
@@ -431,6 +441,16 @@ defmodule ElixirGateway.Cluster.Manager do
         else
           {:ok, ip} -> ip
         end
+    end
+  end
+
+  def transform_peer_address(peer_address) do
+    case String.split(peer_address, ["@", ":"]) do
+      [node_name, host, port_str] ->
+        {:ok, String.to_atom("#{node_name}_#{port_str}@#{host}")}
+
+      _ ->
+        {:error, :invalid_format}
     end
   end
 end

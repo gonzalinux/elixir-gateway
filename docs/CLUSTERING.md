@@ -76,22 +76,17 @@ config :elixirgateway, :cluster,
 
 Requires Namecheap DDNS enabled in your domain dashboard.
 
-```elixir
-config :elixirgateway, :cluster,
-  enabled: true,
-  secret: System.get_env("CLUSTER_SECRET"),
-  node_name: System.get_env("NODE_NAME"),
-  listen_port: 9100,
-  peers: ["other-node.example.com:9100"],
-  dns_failover: [
-    enabled: true,
-    provider: :namecheap_ddns,
-    public_ip_method: :auto,  # or {:static, "1.2.3.4"}
-    domains: [
-      %{host: "@", domain: "example.com", password: System.get_env("DDNS_PASS")}
-    ]
-  ]
+```bash
+# .env file
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<your-secret>
+NODE_NAME=gateway-a
+CLUSTER_PEERS=other-node.example.com:9100
+DNS_FAILOVER_ENABLED=true
+DDNS_DOMAINS=@:example.com:your-ddns-password
 ```
+
+This is automatically parsed by `config/runtime.exs` into the cluster configuration.
 
 ## Configuration Options
 
@@ -123,10 +118,12 @@ services:
   gateway:
     image: elixir-gateway:latest
     environment:
+      CLUSTER_ENABLED: "true"
       CLUSTER_SECRET: "your-secret"
       NODE_NAME: "gateway-a"
       CLUSTER_PEERS: "gateway-b@gateway-b.example.com:9100"
-      DDNS_PASS: "your-ddns-password"
+      DNS_FAILOVER_ENABLED: "true"
+      DDNS_DOMAINS: "@:example.com:your-ddns-password"
     ports:
       - "80:4000"
       - "443:4001"
@@ -153,56 +150,24 @@ For deployments with one static IP (cloud) and one dynamic IP (home):
 ### Recommended: Home Server as Primary
 
 **Home Server (Primary)** - Dynamic IP, manages DNS, initiates connections:
-```elixir
-config :elixirgateway, :cluster,
-  enabled: true,
-  secret: System.get_env("CLUSTER_SECRET"),
-  node_name: "gateway-home",
-  node_ip: nil,  # Auto-detect (optional, can be omitted)
-  listen_port: 9100,
-  peers: ["gateway-cloud@cloud.example.com:9100"],  # Knows cloud's static address
-  dns_failover: [
-    enabled: true,  # Primary manages DNS failover
-    public_ip_method: :auto,  # Auto-detect changing IP
-    domains: [
-      %{host: "@", domain: "example.com", password: System.get_env("DDNS_PASS")}
-    ]
-  ]
-```
-
-**Cloud Server (Secondary)** - Static IP, receives connections:
-```elixir
-config :elixirgateway, :cluster,
-  enabled: true,
-  secret: System.get_env("CLUSTER_SECRET"),
-  node_name: "gateway-cloud",
-  node_ip: System.get_env("CLOUD_PRIVATE_IP"),  # Optional: specify exact IP
-  listen_port: 9100,
-  peers: [],  # Empty - just accepts connections
-  dns_failover: [
-    enabled: false  # Secondary doesn't manage DNS
-  ]
-```
-
-**Environment Variables (Alternative):**
-
-Home Server:
 ```bash
 CLUSTER_ENABLED=true
 CLUSTER_SECRET=<64-char-hex>
 NODE_NAME=gateway-home
 CLUSTER_PEERS=gateway-cloud@cloud.example.com:9100
 DNS_FAILOVER_ENABLED=true
-DDNS_DOMAINS=@:example.com:password
+DDNS_DOMAINS=@:example.com:your-ddns-password
+# PUBLIC_IP_STATIC not set - auto-detect changing IP
 ```
 
-Cloud Server:
+**Cloud Server (Secondary)** - Static IP, receives connections:
 ```bash
 CLUSTER_ENABLED=true
 CLUSTER_SECRET=<same-secret>
 NODE_NAME=gateway-cloud
-CLUSTER_PEERS=  # Empty
+CLUSTER_PEERS=  # Empty - just accepts connections
 DNS_FAILOVER_ENABLED=false
+# NODE_IP can be set to specify exact private IP if needed
 ```
 
 **Role Detection:**
@@ -236,7 +201,7 @@ ElixirGateway.Cluster.DNSFailover.trigger_failover()
 1. Domain List → Manage → Advanced DNS
 2. Enable "Dynamic DNS"
 3. Copy DDNS password
-4. Set as environment variable: `DDNS_PASS`
+4. Add to `DDNS_DOMAINS` environment variable (format: `host:domain:password`)
 
 ## Troubleshooting
 

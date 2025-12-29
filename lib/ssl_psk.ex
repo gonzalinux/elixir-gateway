@@ -53,12 +53,9 @@ defmodule :ssl_psk do
   end
 
   defp validate_and_decode_secret(secret) do
-    secret_preview = String.slice(secret, 0, 8) <> "..."
-    Logger.debug("Validating secret (preview: #{secret_preview}, length: #{String.length(secret)})")
-
     case Base.decode16(secret, case: :mixed) do
       {:ok, bytes} when byte_size(bytes) >= @min_secret_bytes ->
-        Logger.debug("Secret valid: #{byte_size(bytes)} bytes")
+        Logger.debug("Secret is valid")
         {:ok, bytes}
 
       {:ok, _bytes} ->

@@ -50,10 +50,6 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
 
   listen_port = String.to_integer(System.get_env("CLUSTER_PORT", "9100"))
 
-  # Set kernel inet_dist port range via environment (before kernel starts)
-  # This must be done before the application starts
-  System.put_env("ERL_DIST_PORT", to_string(listen_port))
-
   # Parse DNS failover configuration
   dns_failover_config =
     if System.get_env("DNS_FAILOVER_ENABLED") == "true" do

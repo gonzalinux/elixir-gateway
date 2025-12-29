@@ -353,24 +353,6 @@ Enable automatic DNS updates when cluster peers fail. Requires clustering to be 
 DNS_FAILOVER_ENABLED="true"
 ```
 
-### DDNS_PASS_*
-**Type:** String
-**Required:** Yes (if DNS failover enabled)
-**Default:** None
-**Used in:** Various (per domain configuration)
-
-Namecheap Dynamic DNS passwords for each domain. Replace `*` with your domain name.
-
-```bash
-# Example for example.com
-DDNS_PASS_EXAMPLE_COM="your-namecheap-ddns-password"
-
-# Example for another domain
-DDNS_PASS_MYSITE_ORG="another-ddns-password"
-```
-
-**Setup:** Enable Dynamic DNS in Namecheap dashboard (Domain → Advanced DNS → Dynamic DNS).
-
 ### PUBLIC_IP_STATIC
 **Type:** String (IP address)
 **Required:** No
@@ -495,7 +477,7 @@ export HTTPS_PORT=8443
 
 ## Best Practices
 
-1. **Never commit secrets** to version control (SECRET_KEY_BASE, CLUSTER_SECRET, DDNS passwords)
+1. **Never commit secrets** to version control (SECRET_KEY_BASE, CLUSTER_SECRET, DDNS_DOMAINS)
 2. **Use staging environment** for Let's Encrypt testing
 3. **Use persistent storage** for SSL certificates
 4. **Monitor certificate expiration** (Let's Encrypt auto-renews)
