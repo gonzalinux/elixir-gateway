@@ -49,7 +49,8 @@ defmodule ElixirGateway.Cluster.DDNS.Namecheap do
   def update(host, domain, password, ip) do
     url = build_update_url(host, domain, password, ip)
 
-    case Req.get(url) do
+    # Disable auto-decoding since Namecheap returns XML, not JSON
+    case Req.get(url, decode_body: false) do
       {:ok, %{status: 200, body: body}} ->
         parse_response(body)
 

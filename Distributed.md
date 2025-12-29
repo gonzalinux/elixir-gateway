@@ -222,6 +222,39 @@ config :elixirgateway, :cluster,
 
 ## DDNS Implementation
 
+### Automatic IP Change Detection
+
+The gateway periodically checks for public IP address changes (every 5 minutes by default, like ddclient) and automatically updates DNS when changes are detected. This ensures DNS records stay current even when your ISP changes your IP address.
+
+**How it works:**
+1. Quantum scheduler runs `IPChangeDetector` job every 5 minutes
+2. Job fetches current public IP via ipify.org
+3. Compares to cached IP from previous check
+4. If different → triggers DNS update to all configured domains
+5. Only runs on primary node (node with `DDNS_DOMAINS` configured)
+
+**Configuration:**
+```elixir
+# config/config.exs
+config :elixirgateway, ElixirGateway.Scheduler,
+  jobs: [
+    ip_change_detector: [
+      schedule: "*/5 * * * *",  # Every 5 minutes (cron format)
+      task: {ElixirGateway.Cluster.Jobs.IPChangeDetector, :check_ip_change, []},
+      run_strategy: Quantum.RunStrategy.Local
+    ]
+  ]
+```
+
+**Customize check interval:**
+To check more or less frequently, adjust the cron schedule:
+- `*/1 * * * *` - Every 1 minute (not recommended - may hit rate limits)
+- `*/5 * * * *` - Every 5 minutes (default, matches ddclient)
+- `*/10 * * * *` - Every 10 minutes
+- `*/30 * * * *` - Every 30 minutes
+
+### Namecheap DDNS Protocol
+
 Uses Namecheap's standard Dynamic DNS protocol (same as ddclient):
 
 ```elixir
