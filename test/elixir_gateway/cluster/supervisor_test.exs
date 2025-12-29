@@ -26,6 +26,14 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
       else
         Application.delete_env(:elixirgateway, :cluster)
       end
+
+      # Restart the supervisor as a child of the application supervisor
+      # to restore normal application state
+      try do
+        Supervisor.restart_child(ElixirGateway.Supervisor, ClusterSupervisor)
+      catch
+        :exit, _ -> :ok
+      end
     end)
 
     :ok
@@ -46,9 +54,9 @@ defmodule ElixirGateway.Cluster.SupervisorTest do
       pid ->
         ref = Process.monitor(pid)
 
-        # Try normal stop first
+        # Terminate it as a child of the application supervisor to prevent restart
         try do
-          Supervisor.stop(pid, :normal, 1000)
+          Supervisor.terminate_child(ElixirGateway.Supervisor, ClusterSupervisor)
         catch
           :exit, _ -> :ok
         end
