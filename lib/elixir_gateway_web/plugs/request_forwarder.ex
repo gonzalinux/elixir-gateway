@@ -71,10 +71,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       finch_request = Finch.build(method, full_url, headers, body)
       Logger.info("Built Finch request, executing...")
 
-      # Execute request with shorter timeout
+      # Execute request with timeout for large file uploads
       case Finch.request(finch_request, ElixirGateway.Finch,
-             receive_timeout: 10_000,
-             request_timeout: 10_000
+             receive_timeout: 40_000,
+             request_timeout: 40_000
            ) do
         {:ok, response} ->
           duration = System.monotonic_time() - start_time
@@ -173,6 +173,13 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
           conn.body_params != %{} ->
         URI.encode_query(conn.body_params)
 
+      # For multipart data, check if it was parsed
+      String.starts_with?(content_type, "multipart/") and conn.params != %{} ->
+        case read_raw_body(conn) do
+          {body, _conn} -> body
+          _ -> ""
+        end
+
       # For all other content types (including binary), use raw body
       true ->
         case read_raw_body(conn) do
@@ -190,11 +197,32 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   end
 
   defp read_raw_body(conn) do
-    case Plug.Conn.read_body(conn, read_length: 1_000_000, read_timeout: 5_000) do
-      {:ok, body, conn} -> {body, conn}
-      # Body already consumed
-      {:more, _chunk, _conn} -> {"", conn}
-      {:error, _reason} -> {"", conn}
+    case Plug.Conn.read_body(conn,
+           length: 20_000_000,
+           read_length: 1_000_000,
+           read_timeout: 15_000
+         ) do
+      {:ok, body, conn} ->
+        {body, conn}
+
+      {:more, partial_body, conn} ->
+        # For large binary files, read in chunks
+        read_remaining_body(conn, partial_body)
+
+      {:error, _reason} ->
+        {"", conn}
+    end
+  end
+
+  defp read_remaining_body(conn, acc_body) do
+    case Plug.Conn.read_body(conn,
+           length: 20_000_000,
+           read_length: 1_000_000,
+           read_timeout: 15_000
+         ) do
+      {:ok, body, conn} -> {acc_body <> body, conn}
+      {:more, partial_body, conn} -> read_remaining_body(conn, acc_body <> partial_body)
+      {:error, _reason} -> {acc_body, conn}
     end
   end
 
@@ -214,5 +242,41 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       " target=",
       conn.assigns[:target_url] || "unknown"
     ])
+
+    # Emit telemetry event
+    emit_telemetry(conn, status, duration_native)
+  end
+
+  defp emit_telemetry(conn, status, duration_native) do
+    duration_ms = System.convert_time_unit(duration_native, :native, :millisecond)
+
+    # Sample 1 in 10 requests for path tracking to reduce cardinality
+    metadata =
+      if rem(System.unique_integer([:positive]), 10) == 0 do
+        %{
+          method: String.upcase(conn.method),
+          status: to_string(status),
+          target_service: conn.assigns[:target_url] || "unknown",
+          path: conn.request_path,
+          host:
+            conn.assigns[:original_host] || get_req_header(conn, "host") |> List.first() ||
+              "unknown"
+        }
+      else
+        %{
+          method: String.upcase(conn.method),
+          status: to_string(status),
+          target_service: conn.assigns[:target_url] || "unknown",
+          host:
+            conn.assigns[:original_host] || get_req_header(conn, "host") |> List.first() ||
+              "unknown"
+        }
+      end
+
+    :telemetry.execute(
+      [:elixirgateway, :request, :complete],
+      %{duration: duration_ms},
+      metadata
+    )
   end
 end
