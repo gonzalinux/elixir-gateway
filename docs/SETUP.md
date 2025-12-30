@@ -49,6 +49,21 @@ curl -H "Host: api.example.com" http://localhost:4000/users
 # Routes to: http://192.168.1.10:8080/users
 ```
 
+### File Uploads
+The gateway supports large file uploads with the following limits:
+- **Maximum file size**: 20MB
+- **Chunk size**: 1MB per read operation
+- **Timeout**: 15 seconds per chunk, 40 seconds total
+- **Supported formats**: Multipart form data, JSON, binary
+
+Example file upload:
+```bash
+curl -X POST \
+  -H "Host: api.example.com" \
+  -F "file=@large-file.pdf" \
+  http://localhost:4000/upload
+```
+
 ### WebSocket Connections
 WebSocket connections via `/socket` endpoint:
 ```javascript

@@ -36,6 +36,10 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Requ
 - **`DomainRouter`** - Maps domains to target services based on configuration
 - **`RateLimiter`** - Implements rate limiting (100 req/min default, uses Hammer)
 - **`RequestForwarder`** - Forwards HTTP requests using Finch client
+  - Supports large file uploads up to 20MB
+  - Chunked reading (1MB chunks) with 15-second timeout per chunk
+  - Multipart form data handling
+  - Extended timeouts (40 seconds for large transfers)
 - **`WebSocketUpgradePlug`** - Detects and handles WebSocket upgrade requests
 - **`MetricsAuthPlug`** - Protects `/metrics` endpoint with authentication
 
@@ -57,6 +61,10 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Requ
 
 #### Monitoring
 - **PromEx integration** with custom gateway metrics
+  - `elixirgateway_request_total` - Counter with labels: method, status, target_service, path, host
+  - `elixirgateway_request_duration_milliseconds` - Histogram with labels: method, status, target_service, host
+  - Path tracking sampled at 10% to manage cardinality
+  - Cluster health metrics (peers connected, DNS failover state, session registry)
 - **`/metrics`** endpoint for Prometheus scraping
   - Token authentication (if `METRICS_AUTH_TOKEN` env var is set)
   - IP-based authentication (fallback, allows private networks only)
@@ -84,7 +92,7 @@ config :elixirgateway, :gateway,
 - **Gun 2.0** - HTTP/WebSocket client for WebSocket proxying
 - **Hammer 6.1** - Rate limiting
 - **PromEx 1.9** - Prometheus metrics
-- **SiteEncrypt 0.6** - Automatic SSL certificate management
+- **SiteEncrypt 0.7** - Automatic SSL certificate management
 - **Bypass 2.1** - HTTP client mocking for tests
 
 ### Testing Patterns
