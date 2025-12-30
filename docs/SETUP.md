@@ -60,14 +60,33 @@ const socket = new Phoenix.Socket("/socket", {
 ## Monitoring & Metrics
 
 Access monitoring interfaces:
-- **Prometheus metrics**: `http://localhost:4000/metrics` (protected by basic auth in production)
+- **Prometheus metrics**: `http://localhost:4000/metrics`
+  - Protected by Bearer token authentication (if `METRICS_AUTH_TOKEN` is set)
+  - Protected by IP-based authentication (private networks only, if no token is set)
 - **LiveDashboard**: `http://localhost:4000/dev/dashboard` (development only)
 
+### Metrics Authentication
+
+**Token-based (Recommended for Production):**
+```bash
+# Generate and set a token
+export METRICS_AUTH_TOKEN="$(mix phx.gen.secret)"
+
+# Access metrics
+curl -H "Authorization: Bearer your-token" https://gateway.com/metrics
+```
+
+**IP-based (Default):**
+- Allows access only from private network IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x, 127.x.x.x)
+- No token required when accessing from internal networks
+
 Available metrics:
-- Request counts and response times by domain
+- Request counts and response times by domain, path, and host
 - Rate limiting violations
 - Connection pool status
 - SSL certificate status
+- Cluster health (if clustering enabled)
+- Session registry statistics
 - Finch HTTP client metrics
 
 ## Security Configuration

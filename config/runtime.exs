@@ -35,6 +35,13 @@ if System.get_env("HTTP_PORT") || System.get_env("HTTPS_PORT") do
   end
 end
 
+# Metrics authentication token (all environments)
+# If set, metrics endpoint will require Bearer token authentication
+# If not set, metrics endpoint will only allow access from private networks
+if metrics_token = System.get_env("METRICS_AUTH_TOKEN") do
+  config :elixirgateway, :metrics_auth_token, metrics_token
+end
+
 # Native Erlang distribution clustering configuration (all environments)
 if System.get_env("CLUSTER_ENABLED") == "true" do
   secret =

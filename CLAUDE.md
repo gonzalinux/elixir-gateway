@@ -57,7 +57,9 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Requ
 
 #### Monitoring
 - **PromEx integration** with custom gateway metrics
-- **`/metrics`** endpoint for Prometheus scraping (auth required in prod)
+- **`/metrics`** endpoint for Prometheus scraping
+  - Token authentication (if `METRICS_AUTH_TOKEN` env var is set)
+  - IP-based authentication (fallback, allows private networks only)
 - **`/dev/dashboard`** Phoenix LiveDashboard (dev only)
 
 ### Configuration Structure
