@@ -393,6 +393,48 @@ DDNS_DOMAINS="@:example.com:pass1,@:mysite.org:pass2"
 - `api` = subdomain (api.example.com)
 - Use same password for all hosts under one domain
 
+## Metrics Configuration
+
+### METRICS_AUTH_TOKEN
+**Type:** String
+**Required:** No
+**Default:** None (uses IP-based authentication)
+**Used in:** `lib/elixir_gateway_web/plugs/metrics_auth_plug.ex`
+
+Authentication token for protecting the `/metrics` Prometheus endpoint.
+
+**Behavior:**
+- **If set**: Requires Bearer token authentication for all requests to `/metrics`, regardless of IP address
+- **If not set**: Falls back to IP-based authentication (only allows private network IPs)
+
+```bash
+# Generate a secure token
+mix phx.gen.secret
+
+# Or using openssl
+openssl rand -hex 32
+
+# Example
+METRICS_AUTH_TOKEN="your-generated-secret-token-here"
+```
+
+**Usage:**
+
+Access metrics with authentication:
+```bash
+# With token
+curl -H "Authorization: Bearer your-token" https://gateway.com/metrics
+
+# From private network (when no token is configured)
+curl http://192.168.1.10:4000/metrics
+```
+
+**Security Notes:**
+- Token authentication takes precedence over IP-based authentication when configured
+- Use a strong, randomly-generated token (minimum 32 characters recommended)
+- Never commit the token to version control
+- Recommended for production deployments, especially in cloud environments
+
 ## Development & Debugging
 
 Logging configuration is managed through `config/config.exs` and is currently hardcoded. Performance settings like HTTP client pool sizes are also configured in the application code rather than through environment variables.

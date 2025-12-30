@@ -248,6 +248,153 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
     end
   end
 
+  describe "token-based authentication" do
+    setup do
+      # Save original config
+      original_token = Application.get_env(:elixirgateway, :metrics_auth_token)
+
+      on_exit(fn ->
+        # Restore original config
+        if original_token do
+          Application.put_env(:elixirgateway, :metrics_auth_token, original_token)
+        else
+          Application.delete_env(:elixirgateway, :metrics_auth_token)
+        end
+      end)
+
+      {:ok, original_token: original_token}
+    end
+
+    test "allows access with valid Bearer token", %{conn: conn} do
+      # Set a test token
+      Application.put_env(:elixirgateway, :metrics_auth_token, "test-secret-token-123")
+
+      # Make request with valid token from public IP (should be allowed)
+      conn =
+        conn
+        |> Map.put(:remote_ip, {8, 8, 8, 8})
+        |> put_req_header("authorization", "Bearer test-secret-token-123")
+        |> MetricsAuthPlug.call([])
+
+      refute conn.halted
+    end
+
+    test "blocks access with invalid Bearer token", %{conn: conn} do
+      Application.put_env(:elixirgateway, :metrics_auth_token, "test-secret-token-123")
+
+      conn =
+        conn
+        |> Map.put(:remote_ip, {8, 8, 8, 8})
+        |> put_req_header("authorization", "Bearer wrong-token")
+        |> MetricsAuthPlug.call([])
+
+      assert conn.halted
+      assert conn.status == 401
+      assert conn.resp_body =~ "Unauthorized: Invalid authentication token"
+    end
+
+    test "blocks access when token is required but not provided", %{conn: conn} do
+      Application.put_env(:elixirgateway, :metrics_auth_token, "test-secret-token-123")
+
+      conn =
+        conn
+        |> Map.put(:remote_ip, {8, 8, 8, 8})
+        |> MetricsAuthPlug.call([])
+
+      assert conn.halted
+      assert conn.status == 401
+      assert conn.resp_body =~ "Unauthorized: Metrics endpoint requires authentication"
+      assert conn.resp_body =~ "Authorization: Bearer <token>"
+    end
+
+    test "blocks access with malformed Authorization header", %{conn: conn} do
+      Application.put_env(:elixirgateway, :metrics_auth_token, "test-secret-token-123")
+
+      # Test various malformed headers
+      malformed_headers = [
+        "Basic test-token",
+        "bearer test-token",
+        # Lowercase bearer
+        "test-token",
+        # No Bearer prefix
+        "Bearer",
+        # Missing token
+        ""
+      ]
+
+      Enum.each(malformed_headers, fn header ->
+        conn =
+          conn
+          |> Map.put(:remote_ip, {8, 8, 8, 8})
+          |> put_req_header("authorization", header)
+          |> MetricsAuthPlug.call([])
+
+        assert conn.halted
+        assert conn.status == 401
+      end)
+    end
+
+    test "falls back to IP validation when no token is configured", %{conn: conn} do
+      # Ensure no token is configured
+      Application.delete_env(:elixirgateway, :metrics_auth_token)
+
+      # Should allow private IP
+      conn_private =
+        conn
+        |> Map.put(:remote_ip, {192, 168, 1, 1})
+        |> MetricsAuthPlug.call([])
+
+      refute conn_private.halted
+
+      # Should block public IP
+      conn_public =
+        conn
+        |> Map.put(:remote_ip, {8, 8, 8, 8})
+        |> MetricsAuthPlug.call([])
+
+      assert conn_public.halted
+      assert conn_public.status == 403
+    end
+
+    test "token authentication takes precedence over IP validation", %{conn: conn} do
+      Application.put_env(:elixirgateway, :metrics_auth_token, "test-token")
+
+      # Even with private IP, should require token
+      conn_no_token =
+        conn
+        |> Map.put(:remote_ip, {192, 168, 1, 1})
+        |> MetricsAuthPlug.call([])
+
+      assert conn_no_token.halted
+      assert conn_no_token.status == 401
+
+      # With valid token from public IP, should allow
+      conn_with_token =
+        conn
+        |> Map.put(:remote_ip, {8, 8, 8, 8})
+        |> put_req_header("authorization", "Bearer test-token")
+        |> MetricsAuthPlug.call([])
+
+      refute conn_with_token.halted
+    end
+
+    test "handles empty token configuration", %{conn: conn} do
+      # Set token to empty string
+      Application.put_env(:elixirgateway, :metrics_auth_token, "")
+
+      # Should fall back to IP validation (empty string is not nil)
+      # But empty string won't match any token, so all requests should fail
+      conn =
+        conn
+        |> Map.put(:remote_ip, {192, 168, 1, 1})
+        |> put_req_header("authorization", "Bearer test-token")
+        |> MetricsAuthPlug.call([])
+
+      assert conn.halted
+      assert conn.status == 401
+    end
+  end
+
   describe "init function" do
     test "init returns options unchanged" do
       opts = [some: :option]
