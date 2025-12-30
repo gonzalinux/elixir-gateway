@@ -158,7 +158,7 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           [:elixirgateway, :request, :total],
           event_name: [:elixirgateway, :request, :complete],
           description: "Total number of requests processed",
-          tags: [:method, :status, :target_service]
+          tags: [:method, :status, :target_service, :path, :host]
         ),
         distribution(
           [:elixirgateway, :request, :duration, :milliseconds],
@@ -166,7 +166,7 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           description: "Request duration in milliseconds",
           measurement: :duration,
           unit: {:native, :millisecond},
-          tags: [:method, :status, :target_service],
+          tags: [:method, :status, :target_service, :host],
           reporter_options: [buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]]
         )
       ]
