@@ -12,7 +12,9 @@ A high-performance API Gateway built with Phoenix that provides domain-based rou
 - **SSL/TLS support**: Automatic Let's Encrypt certificates or manual SSL configuration
 - **WebSocket proxying**: Transparent WebSocket proxying with session preservation
 - **Phoenix LiveView support**: Full support for LiveView applications with session continuity
-- **Prometheus metrics**: Complete observability with PromEx
+- **Large file uploads**: Support for files up to 20MB with chunked reading
+- **Prometheus metrics**: Complete observability with PromEx (path and host labels)
+- **High availability clustering**: Distributed Erlang clustering with automatic failover
 - **High performance**: Uses Finch HTTP client for optimal connection pooling
 
 ## Quick Start
@@ -59,4 +61,4 @@ Internet → Elixir-Gateway → Internal Services
 [Metrics Collection]            [Finch HTTP Client]
 ```
 
-Built with Phoenix v1.7.21 and Elixir ~> 1.14
+Built with Phoenix v1.7.21 and Elixir ~> 1.16
