@@ -16,6 +16,8 @@ config :elixirgateway, :gateway,
   services: %{
     # default is used when no host comes in the headers
     "default" => "http://localhost:8000",
+    # default_any is used when an unknown domain/IP is requested
+    "default_any" => "http://localhost:8000",
     "yoursite.com" => "http://192.168.0.178:9022"
   },
   rate_limit: [

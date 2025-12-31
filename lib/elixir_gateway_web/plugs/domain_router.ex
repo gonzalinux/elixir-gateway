@@ -14,12 +14,32 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
 
     case Map.get(services, host) do
       nil ->
-        Logger.warning("No service configured for host: #{host}")
+        # Try default_any fallback for unknown domains (not for missing host which uses "default")
+        if host != "default" do
+          case Map.get(services, "default_any") do
+            nil ->
+              Logger.warning("No service configured for host: #{host}, and no default_any fallback")
 
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
-        |> halt()
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
+              |> halt()
+
+            target_url ->
+              Logger.info("Routing unknown host #{host} to default_any service")
+
+              conn
+              |> assign(:target_url, target_url)
+              |> assign(:original_host, host)
+          end
+        else
+          Logger.warning("No service configured for host: #{host}")
+
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
+          |> halt()
+        end
 
       target_url ->
         conn

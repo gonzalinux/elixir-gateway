@@ -14,7 +14,8 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
         services: %{
           "api.example.com" => "http://backend1.local:8080",
           "admin.example.com" => "https://backend2.local:9443",
-          "default" => "http://default.local:3000"
+          "default" => "http://default.local:3000",
+          "default_any" => "http://fallback.local:4000"
         }
       )
 
@@ -65,15 +66,15 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
       refute conn.halted
     end
 
-    test "falls back to default when host not found" do
+    test "falls back to default_any when unknown host is requested" do
       conn =
         conn(:get, "/")
         |> Map.put(:host, "unknown.example.com")
         |> DomainRouter.call([])
 
-      assert conn.status == 404
-      assert conn.halted
-      assert conn.resp_body =~ "Service not found for host: unknown.example.com"
+      assert conn.assigns[:target_url] == "http://fallback.local:4000"
+      assert conn.assigns[:original_host] == "unknown.example.com"
+      refute conn.halted
     end
 
     test "falls back to default when no host header present" do
@@ -113,7 +114,26 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
       refute conn.halted
     end
 
-    test "returns JSON error response for unmapped domain" do
+    test "routes IP address to default_any" do
+      conn =
+        conn(:get, "/")
+        |> Map.put(:host, "192.168.1.100")
+        |> DomainRouter.call([])
+
+      assert conn.assigns[:target_url] == "http://fallback.local:4000"
+      assert conn.assigns[:original_host] == "192.168.1.100"
+      refute conn.halted
+    end
+
+    test "returns 404 when unknown domain and no default_any configured" do
+      # Temporarily remove default_any from config
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{
+          "api.example.com" => "http://backend1.local:8080",
+          "default" => "http://default.local:3000"
+        }
+      )
+
       conn =
         conn(:get, "/")
         |> Map.put(:host, "nonexistent.com")
