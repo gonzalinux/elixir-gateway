@@ -38,7 +38,43 @@ defmodule ElixirGateway.Cluster.Jobs.IPChangeDetector do
     dns_enabled = Keyword.get(dns_config, :enabled, false)
     domains = Keyword.get(dns_config, :domains, [])
 
-    # Only check if clustering is enabled, DNS failover is enabled, and domains are configured
-    cluster_enabled and dns_enabled and domains != []
+    # Base requirements
+    base_check = cluster_enabled and dns_enabled and domains != []
+
+    # Role-based logic:
+    # - Primary nodes: Always check IP (they manage DNS)
+    # - Secondary nodes: Only check IP when cluster is unhealthy (failover scenario)
+    cond do
+      not base_check ->
+        false
+
+      is_primary?() ->
+        # Primary node: always check IP changes
+        true
+
+      true ->
+        # Secondary node: only check IP when cluster is unhealthy (primary is down)
+        not ElixirGateway.Cluster.Manager.cluster_healthy?()
+    end
+  end
+
+  defp is_primary? do
+    # Check IS_PRIMARY env var or auto-detect from DNS failover configuration
+    case System.get_env("IS_PRIMARY") do
+      "true" ->
+        true
+
+      "false" ->
+        false
+
+      _ ->
+        # Auto-detect: If DNS failover domains are configured, this is the primary
+        # (primary manages DNS updates, typically the home server)
+        # Secondary nodes (cloud) don't manage DNS, they just accept connections
+        cluster_config = Application.get_env(:elixirgateway, :cluster, [])
+        dns_config = Keyword.get(cluster_config, :dns_failover, [])
+        domains = Keyword.get(dns_config, :domains, [])
+        domains != [] and Keyword.get(dns_config, :enabled, false)
+    end
   end
 end
