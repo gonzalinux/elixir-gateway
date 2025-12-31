@@ -18,7 +18,9 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
         if host != "default" do
           case Map.get(services, "default_any") do
             nil ->
-              Logger.warning("No service configured for host: #{host}, and no default_any fallback")
+              Logger.warning(
+                "No service configured for host: #{host}, and no default_any fallback"
+              )
 
               conn
               |> put_resp_content_type("application/json")
