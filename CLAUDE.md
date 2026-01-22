@@ -131,7 +131,7 @@ end
   - Generate Let's Encrypt certificates automatically
   - Broadcast certificates to secondary nodes via Erlang RPC:
     - **Automatically** when new certificates are generated
-    - **Automatically** when a secondary node connects to the cluster
+    - **Automatically** when a secondary node connects to the cluster (3-second delay to ensure SiteEncrypt initialization completes)
   - Monitor node connections to ensure new peers receive existing certificates
 
 - **Secondary nodes** (`IS_PRIMARY=false`):

@@ -223,36 +223,49 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   @impl true
   def handle_info({:nodeup, node, _info}, %{role: :primary} = state) do
-    # New peer connected - automatically sync certificates
+    # New peer connected - schedule automatic certificate sync after delay
+    # Delay ensures SiteEncrypt on the secondary finishes initialization first
     if state.cert_sync_enabled do
-      Logger.info("New peer #{node} connected, initiating automatic certificate sync")
+      Logger.info(
+        "New peer #{node} connected, scheduling automatic certificate sync in 3 seconds"
+      )
 
-      # Get the primary domain from SiteEncrypt config
-      case get_primary_domain() do
-        {:ok, domain} ->
-          # Check if certificates exist for this domain
-          case read_certificates(domain, state.db_folder) do
-            {:ok, _cert_bundle} ->
-              # Sync to the newly connected peer only
-              case broadcast_to_peer(node, domain, state) do
-                :ok ->
-                  Logger.info("Successfully synced certificates to new peer #{node}")
+      Process.send_after(self(), {:sync_to_new_peer, node}, 3_000)
+    end
 
-                {:error, reason} ->
-                  Logger.warning(
-                    "Failed to sync certificates to new peer #{node}: #{inspect(reason)}"
-                  )
-              end
+    {:noreply, state}
+  end
 
-            {:error, reason} ->
-              Logger.debug(
-                "No certificates to sync for domain #{domain}: #{inspect(reason)}"
-              )
-          end
+  @impl true
+  def handle_info({:sync_to_new_peer, node}, %{role: :primary} = state) do
+    # Sync certificates to a newly connected peer
+    Logger.info("Initiating automatic certificate sync to #{node}")
 
-        {:error, :no_domains} ->
-          Logger.debug("No domains configured, skipping automatic certificate sync")
-      end
+    # Get the primary domain from SiteEncrypt config
+    case get_primary_domain() do
+      {:ok, domain} ->
+        # Check if certificates exist for this domain
+        case read_certificates(domain, state.db_folder) do
+          {:ok, _cert_bundle} ->
+            # Sync to the newly connected peer only
+            case broadcast_to_peer(node, domain, state) do
+              :ok ->
+                Logger.info("Successfully synced certificates to new peer #{node}")
+
+              {:error, reason} ->
+                Logger.warning(
+                  "Failed to sync certificates to new peer #{node}: #{inspect(reason)}"
+                )
+            end
+
+          {:error, reason} ->
+            Logger.debug(
+              "No certificates to sync for domain #{domain}: #{inspect(reason)}"
+            )
+        end
+
+      {:error, :no_domains} ->
+        Logger.debug("No domains configured, skipping automatic certificate sync")
     end
 
     {:noreply, state}

@@ -366,8 +366,8 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
       # In real scenario, this would come from :net_kernel
       send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
 
-      # Give it time to process
-      Process.sleep(100)
+      # Give it time to schedule the sync (3 second delay + processing time)
+      Process.sleep(3_200)
 
       # Verify that the manager tried to sync (won't actually succeed since no real peer)
       # But we can check logs or state
@@ -426,8 +426,8 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
       # Simulate a peer connecting
       send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
 
-      # Give it time to process
-      Process.sleep(100)
+      # Give it time to schedule and process the sync
+      Process.sleep(3_200)
 
       # Should handle gracefully without crashing
       assert Process.alive?(pid)
@@ -453,8 +453,8 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
       # Simulate a peer connecting
       send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
 
-      # Give it time to process
-      Process.sleep(100)
+      # Give it time to schedule and process the sync
+      Process.sleep(3_200)
 
       # Should handle gracefully without crashing
       assert Process.alive?(pid)
