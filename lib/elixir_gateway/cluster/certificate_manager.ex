@@ -119,6 +119,12 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
     if enabled do
       Logger.info("Certificate sync manager started as #{role} (db: #{db_folder})")
+
+      # Primary nodes monitor for new peers to automatically sync certificates
+      if role == :primary do
+        :net_kernel.monitor_nodes(true, node_type: :all)
+        Logger.debug("Monitoring node connections for automatic certificate sync")
+      end
     else
       Logger.info("Certificate sync disabled")
     end
@@ -215,6 +221,53 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     end
   end
 
+  @impl true
+  def handle_info({:nodeup, node, _info}, %{role: :primary} = state) do
+    # New peer connected - automatically sync certificates
+    if state.cert_sync_enabled do
+      Logger.info("New peer #{node} connected, initiating automatic certificate sync")
+
+      # Get the primary domain from SiteEncrypt config
+      case get_primary_domain() do
+        {:ok, domain} ->
+          # Check if certificates exist for this domain
+          case read_certificates(domain, state.db_folder) do
+            {:ok, _cert_bundle} ->
+              # Sync to the newly connected peer only
+              case broadcast_to_peer(node, domain, state) do
+                :ok ->
+                  Logger.info("Successfully synced certificates to new peer #{node}")
+
+                {:error, reason} ->
+                  Logger.warning(
+                    "Failed to sync certificates to new peer #{node}: #{inspect(reason)}"
+                  )
+              end
+
+            {:error, reason} ->
+              Logger.debug(
+                "No certificates to sync for domain #{domain}: #{inspect(reason)}"
+              )
+          end
+
+        {:error, :no_domains} ->
+          Logger.debug("No domains configured, skipping automatic certificate sync")
+      end
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info({:nodeup, _node, _info}, state) do
+    # Secondary nodes ignore nodeup events
+    {:noreply, state}
+  end
+
+  def handle_info({:nodedown, _node, _info}, state) do
+    # Ignore nodedown events (ClusterManager handles reconnection)
+    {:noreply, state}
+  end
+
   ## Private Functions
 
   defp get_rpc_timeout do
@@ -225,6 +278,26 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   defp calculate_backoff(attempt) do
     Utils.exponential_backoff(attempt, base_delay: @sync_retry_base_delay)
+  end
+
+  defp get_primary_domain do
+    # Get the first domain from LETSENCRYPT_DOMAINS env var
+    case System.get_env("LETSENCRYPT_DOMAINS") do
+      nil ->
+        {:error, :no_domains}
+
+      domains_string ->
+        domains =
+          domains_string
+          |> String.split(",")
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+
+        case domains do
+          [domain | _] -> {:ok, domain}
+          [] -> {:error, :no_domains}
+        end
+    end
   end
 
   defp determine_role(cluster_config) do
@@ -360,6 +433,13 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   defp get_connected_peers_with_retry(_attempt, _max_attempts) do
     Logger.warning("Failed to get connected peers after all retries")
     {:ok, []}
+  end
+
+  defp broadcast_to_peer(peer_node, domain, state) when is_binary(domain) do
+    # Read certificates and broadcast to a specific peer
+    with {:ok, cert_bundle} <- read_certificates(domain, state.db_folder) do
+      broadcast_to_peer(peer_node, cert_bundle, state.rpc_timeout)
+    end
   end
 
   defp broadcast_to_peer(peer_node, cert_bundle, rpc_timeout) do

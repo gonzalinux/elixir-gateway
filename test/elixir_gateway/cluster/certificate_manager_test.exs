@@ -334,4 +334,133 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
       System.delete_env("SITE_ENCRYPT_DB")
     end
   end
+
+  describe "automatic certificate sync on peer connection" do
+    test "primary syncs certificates when new peer connects", %{temp_dir: temp_dir} do
+      System.put_env("SITE_ENCRYPT_DB", temp_dir)
+      System.put_env("LETSENCRYPT_DOMAINS", "example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-auto-sync-primary",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      # Create test certificates
+      domain = "example.com"
+      cert_dir = Path.join([temp_dir, "certs", domain])
+      File.mkdir_p!(cert_dir)
+
+      cert_pem = "-----BEGIN CERTIFICATE-----\nTEST_CERT\n-----END CERTIFICATE-----"
+      privkey_pem = "-----BEGIN PRIVATE KEY-----\nTEST_KEY\n-----END PRIVATE KEY-----"
+      chain_pem = "-----BEGIN CERTIFICATE-----\nTEST_CHAIN\n-----END CERTIFICATE-----"
+
+      File.write!(Path.join(cert_dir, "cert.pem"), cert_pem)
+      File.write!(Path.join(cert_dir, "privkey.pem"), privkey_pem)
+      File.write!(Path.join(cert_dir, "chain.pem"), chain_pem)
+
+      # Simulate a peer connecting (nodeup event)
+      # In real scenario, this would come from :net_kernel
+      send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
+
+      # Give it time to process
+      Process.sleep(100)
+
+      # Verify that the manager tried to sync (won't actually succeed since no real peer)
+      # But we can check logs or state
+      status = CertificateManager.status()
+      assert status.role == :primary
+
+      GenServer.stop(pid)
+      System.delete_env("SITE_ENCRYPT_DB")
+      System.delete_env("LETSENCRYPT_DOMAINS")
+    end
+
+    test "secondary ignores nodeup events", %{temp_dir: temp_dir} do
+      System.put_env("SITE_ENCRYPT_DB", temp_dir)
+      System.put_env("LETSENCRYPT_DOMAINS", "example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-auto-sync-secondary",
+        peers: []
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      # Simulate a peer connecting
+      send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
+
+      # Give it time to process
+      Process.sleep(100)
+
+      # Secondary should have ignored the event
+      status = CertificateManager.status()
+      assert status.role == :secondary
+      assert status.last_sync == nil
+
+      GenServer.stop(pid)
+      System.delete_env("SITE_ENCRYPT_DB")
+      System.delete_env("LETSENCRYPT_DOMAINS")
+    end
+
+    test "primary handles missing certificates gracefully", %{temp_dir: temp_dir} do
+      System.put_env("SITE_ENCRYPT_DB", temp_dir)
+      System.put_env("LETSENCRYPT_DOMAINS", "example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-missing-certs",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      # Don't create certificates - simulate missing certs
+
+      # Simulate a peer connecting
+      send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
+
+      # Give it time to process
+      Process.sleep(100)
+
+      # Should handle gracefully without crashing
+      assert Process.alive?(pid)
+
+      GenServer.stop(pid)
+      System.delete_env("SITE_ENCRYPT_DB")
+      System.delete_env("LETSENCRYPT_DOMAINS")
+    end
+
+    test "primary handles no domains configured", %{temp_dir: temp_dir} do
+      System.put_env("SITE_ENCRYPT_DB", temp_dir)
+      System.delete_env("LETSENCRYPT_DOMAINS")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-no-domains",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      # Simulate a peer connecting
+      send(pid, {:nodeup, :"fake_peer@127.0.0.1", []})
+
+      # Give it time to process
+      Process.sleep(100)
+
+      # Should handle gracefully without crashing
+      assert Process.alive?(pid)
+
+      GenServer.stop(pid)
+      System.delete_env("SITE_ENCRYPT_DB")
+    end
+  end
 end

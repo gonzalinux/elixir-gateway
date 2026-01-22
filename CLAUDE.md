@@ -129,13 +129,17 @@ end
 - **Primary nodes** (`IS_PRIMARY` not set, or peers configured):
   - Run SiteEncrypt with full ACME challenge capability
   - Generate Let's Encrypt certificates automatically
-  - Broadcast certificates to secondary nodes via Erlang RPC
+  - Broadcast certificates to secondary nodes via Erlang RPC:
+    - **Automatically** when new certificates are generated
+    - **Automatically** when a secondary node connects to the cluster
+  - Monitor node connections to ensure new peers receive existing certificates
 
 - **Secondary nodes** (`IS_PRIMARY=false`):
   - Run SiteEncrypt in **manual mode** with empty domains
   - **DO NOT** attempt ACME challenges (prevents rate limiting issues)
   - Receive certificates from primary via `CertificateManager` cluster sync
   - Certificates written to same `SITE_ENCRYPT_DB` path and loaded automatically
+  - Automatically receive certificates upon connecting to primary (no manual sync needed)
 
 **Role Detection:**
 1. Explicit: `IS_PRIMARY=false` → Secondary (receives certs)
