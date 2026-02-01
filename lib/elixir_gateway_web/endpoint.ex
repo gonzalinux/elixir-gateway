@@ -148,7 +148,8 @@ defmodule ElixirGatewayWeb.Endpoint do
 
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
-    pass: ["application/x-www-form-urlencoded", "multipart/form-data", "application/json"],
+    pass: ["*/*"],
+    length: 20_000_000,
     json_decoder: Phoenix.json_library()
   )
 
