@@ -235,3 +235,278 @@ The cluster uses native Erlang distribution with TLS configured via `priv/ssl_di
 - **Secret Storage**: Should be stored securely and never committed to version control
 - **Forward Secrecy**: DHE-PSK ciphersuites provide forward secrecy
 - **No Certificates**: PSK authentication eliminates certificate management overhead
+
+## Active-Active Load Distribution
+
+**Feature Status:** Optional, requires explicit configuration
+
+ElixirGateway supports active-active load distribution where the primary (home) server receives all DNS traffic and intelligently distributes load across all connected nodes based on configured weights.
+
+### Architecture
+
+```
+DNS → Home Server (Primary - 100% traffic)
+        ├─→ Home Backend (70% - weighted)
+        ├─→ Cloud1 Backend (30% - RPC forward)
+        └─→ Cloud2 Backend (15% - RPC forward)
+```
+
+**Key Features:**
+- Weight-based proportional distribution
+- Session affinity preservation across requests
+- Traffic threshold (routes locally when below 20 req/min)
+- Automatic fallback if remote node fails
+- Dynamic weight recalculation on node connect/disconnect
+- Zero overhead when disabled
+
+### How It Works
+
+1. **DNS Resolution**: All traffic points to primary (home) server
+2. **Request Routing**:
+   - **Below threshold** (<20 req/min): All traffic stays local (no RPC overhead)
+   - **Above threshold**: New sessions distributed proportionally via RPC
+   - **Existing sessions**: Always routed to original node (affinity preserved)
+3. **RPC Forwarding**: Primary forwards requests to secondary nodes via Erlang RPC
+4. **Failure Handling**: If secondary down, automatically falls back to local processing
+
+### Weight-Based Distribution
+
+Each node is assigned a **capacity weight** (points). Traffic is distributed proportionally:
+
+**Example 1: Home Only**
+- Primary (home): 70 points
+- **Distribution**: Home = 100%
+
+**Example 2: Home + 1 Cloud**
+- Primary (home): 70 points
+- Secondary (cloud1): 30 points
+- Total: 100 points
+- **Distribution**: Home = 70%, Cloud1 = 30%
+
+**Example 3: Home + 2 Clouds**
+- Primary (home): 70 points
+- Secondary (cloud1): 30 points
+- Secondary (cloud2): 15 points
+- Total: 115 points
+- **Distribution**: Home = 60.9%, Cloud1 = 26.1%, Cloud2 = 13.0%
+
+### Configuration
+
+#### Primary Server (Home) - Distributes Load
+
+```bash
+# Enable load distribution
+LOAD_DISTRIBUTION_ENABLED=true
+
+# Primary node weight (default: 70)
+PRIMARY_WEIGHT=70
+
+# Secondary node weights (format: "node_name:weight,node_name:weight")
+# Node names must match the actual Erlang node names
+SECONDARY_WEIGHTS="gateway-cloud1@cloud.example.com:30,gateway-cloud2@cloud2.example.com:15"
+
+# Minimum requests per minute before distribution kicks in (default: 20)
+MIN_REQ_THRESHOLD=20
+
+# Cluster configuration (required)
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<64-char-hex>
+NODE_NAME=gateway-home
+CLUSTER_PEERS=cloud.example.com:9100
+```
+
+#### Secondary Servers (Cloud) - Accept Forwarded Requests
+
+```bash
+# Disable distribution (just accept forwarded requests)
+LOAD_DISTRIBUTION_ENABLED=false
+
+# Cluster configuration (required)
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=<same-secret>
+NODE_NAME=gateway-cloud1
+CLUSTER_PEERS=  # Empty - accepts connections
+IS_PRIMARY=false
+```
+
+### Complete Example
+
+**Home Server (Primary):**
+```bash
+# Cluster setup
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=abc123...
+NODE_NAME=gateway-home
+CLUSTER_PEERS=cloud1.example.com:9100,cloud2.example.com:9100
+DNS_FAILOVER_ENABLED=true
+DDNS_DOMAINS=@:example.com:password
+
+# Load distribution
+LOAD_DISTRIBUTION_ENABLED=true
+PRIMARY_WEIGHT=70
+SECONDARY_WEIGHTS="gateway-cloud1@cloud1.example.com:30,gateway-cloud2@cloud2.example.com:15"
+MIN_REQ_THRESHOLD=20
+```
+
+**Cloud Server 1:**
+```bash
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=abc123...
+NODE_NAME=gateway-cloud1
+CLUSTER_PEERS=  # Empty
+IS_PRIMARY=false
+LOAD_DISTRIBUTION_ENABLED=false
+```
+
+**Cloud Server 2:**
+```bash
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=abc123...
+NODE_NAME=gateway-cloud2
+CLUSTER_PEERS=  # Empty
+IS_PRIMARY=false
+LOAD_DISTRIBUTION_ENABLED=false
+```
+
+### Monitoring & Metrics
+
+Load distribution exposes several Prometheus metrics:
+
+#### Request Distribution
+```prometheus
+# Requests routed to each node
+elixirgateway_load_distribution_request_total{target_node="gateway-home@..."}
+
+# RPC forwarding latency
+elixirgateway_rpc_forward_duration_milliseconds{destination_node="gateway-cloud1@...",status="ok"}
+```
+
+#### Node Weights
+```prometheus
+# Weight per node
+elixirgateway_load_distribution_node_weight{node_name="gateway-home@..."}
+
+# Total active weight
+elixirgateway_load_distribution_total_weight
+
+# Feature status
+elixirgateway_load_distribution_enabled  # 1=enabled, 0=disabled
+
+# Traffic threshold status
+elixirgateway_load_distribution_below_threshold  # 1=below, 0=above
+```
+
+### Verification
+
+After configuration, verify load distribution:
+
+```bash
+# 1. Check metrics endpoint
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://yourdomain.com/metrics | grep load_distribution
+
+# Expected output with 2 secondaries (70+30+15=115):
+# elixirgateway_load_distribution_total_weight 115
+# elixirgateway_load_distribution_node_weight{node_name="gateway-home@..."} 70
+# elixirgateway_load_distribution_node_weight{node_name="gateway-cloud1@..."} 30
+# elixirgateway_load_distribution_node_weight{node_name="gateway-cloud2@..."} 15
+# elixirgateway_load_distribution_enabled 1
+
+# 2. Generate load and check distribution
+ab -n 1000 -c 10 https://yourdomain.com/api/health
+
+# 3. Verify request counts (should match weight proportions)
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://yourdomain.com/metrics | grep load_distribution_request_total
+```
+
+### Performance Impact
+
+**Latency:**
+- Local requests: 0ms overhead (no change)
+- Forwarded requests: +10-50ms (RPC + remote processing)
+- Only affects traffic routed to secondary nodes
+- Below threshold: Zero overhead (all local)
+
+**Throughput:**
+- Scales proportionally to total configured weights
+- Example: 70 + 30 + 15 = 115 points = ~64% capacity increase
+- Add more secondaries to further increase capacity
+
+### Failure Scenarios
+
+#### Secondary Node Fails
+- RPC returns `:nodedown`
+- Automatic fallback to local processing
+- LoadDistributor excludes failed node from weight calculation
+- Example: Home=70, Cloud1=30, Cloud2=15 → Cloud1 fails → Home=82.4%, Cloud2=17.6%
+- No user impact (graceful degradation)
+
+#### Primary Node Fails
+- DNS failover switches to cloud IP
+- Cloud processes 100% of traffic locally (no forwarding)
+- Existing sessions lost (users reconnect)
+
+#### Session Affinity Conflict
+- Session registered on cloud, cloud is down
+- Same as secondary failure - fallback to local
+- May cause temporary backend inconsistency (backend should handle eventual consistency)
+
+### Traffic Threshold Behavior
+
+When traffic is **below** the minimum threshold (default: 20 requests/minute):
+- All traffic stays on primary (home) server
+- Secondary nodes sit idle but ready
+- Prevents RPC overhead for low traffic periods
+- Automatically switches to distributed mode when traffic increases
+
+When traffic **exceeds** the threshold:
+- New sessions distributed via weighted random selection
+- Existing sessions maintain affinity to original node
+- Proportional distribution based on configured weights
+
+### Dynamic Node Management
+
+**Adding a New Secondary:**
+1. Configure new node with clustering enabled
+2. Add node's weight to `SECONDARY_WEIGHTS` on primary
+3. Restart primary (or wait for config reload)
+4. New node immediately participates in distribution
+
+**Removing a Secondary:**
+1. Stop the secondary node
+2. LoadDistributor automatically excludes it from weights
+3. Traffic automatically redistributes to remaining nodes
+4. Update `SECONDARY_WEIGHTS` to clean up config (optional)
+
+### Troubleshooting
+
+**Issue: All traffic goes to primary even when above threshold**
+- Check `LOAD_DISTRIBUTION_ENABLED=true` on primary
+- Verify secondary nodes are connected: Check cluster health metrics
+- Confirm node names in `SECONDARY_WEIGHTS` match actual Erlang node names
+- Check logs for "Selected node via weighted distribution"
+
+**Issue: High RPC latency**
+- Check network latency between primary and secondary
+- Verify secondary nodes have sufficient resources
+- Monitor `elixirgateway_rpc_forward_duration_milliseconds` metric
+- Consider adjusting weights to reduce traffic to slow nodes
+
+**Issue: Sessions not maintaining affinity**
+- Verify `ConnectionRegistry` is running (check cluster metrics)
+- Check session identification (X-Session-ID header or cookies)
+- Monitor `elixirgateway_session_registry_active_sessions` metric
+
+**Issue: Secondary node showing in metrics but not receiving traffic**
+- Verify node is actually connected to cluster
+- Check `elixirgateway_load_distribution_node_weight` metric
+- Ensure traffic is above threshold (check `elixirgateway_load_distribution_below_threshold`)
+
+### Best Practices
+
+1. **Weight Assignment**: Assign weights proportional to actual hardware capacity
+2. **Threshold Configuration**: Adjust `MIN_REQ_THRESHOLD` based on your traffic patterns
+3. **Monitoring**: Set up alerts on RPC latency and node availability
+4. **Session Affinity**: Use consistent session identifiers (cookies or X-Session-ID)
+5. **Gradual Rollout**: Start with one secondary, verify behavior, then add more
+6. **Capacity Planning**: Monitor weight distribution and adjust as needed
+7. **Testing**: Test failover scenarios in staging before production

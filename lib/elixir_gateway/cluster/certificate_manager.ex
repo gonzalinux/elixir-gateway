@@ -259,9 +259,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
             end
 
           {:error, reason} ->
-            Logger.debug(
-              "No certificates to sync for domain #{domain}: #{inspect(reason)}"
-            )
+            Logger.debug("No certificates to sync for domain #{domain}: #{inspect(reason)}")
         end
 
       {:error, :no_domains} ->

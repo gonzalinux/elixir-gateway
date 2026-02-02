@@ -23,7 +23,10 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       dns_failover_metrics(poll_rate),
 
       # Session registry metrics
-      session_registry_metrics(poll_rate)
+      session_registry_metrics(poll_rate),
+
+      # Load distribution metrics
+      load_distribution_metrics(poll_rate)
     ]
   end
 
@@ -34,7 +37,13 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       gateway_request_metrics(),
 
       # Response time metrics
-      gateway_response_time_metrics()
+      gateway_response_time_metrics(),
+
+      # Load distribution event metrics
+      load_distribution_event_metrics(),
+
+      # RPC forwarding metrics
+      rpc_forwarding_metrics()
     ]
   end
 
@@ -150,6 +159,41 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
     )
   end
 
+  defp load_distribution_metrics(poll_rate) do
+    Polling.build(
+      :load_distribution_metrics,
+      poll_rate,
+      {__MODULE__, :execute_load_distribution, []},
+      [
+        last_value(
+          [:elixirgateway, :load_distribution, :node, :weight],
+          event_name: [:elixirgateway, :load_distribution, :node, :weight],
+          description: "Configured weight for each active node",
+          measurement: :weight,
+          tags: [:node_name]
+        ),
+        last_value(
+          [:elixirgateway, :load_distribution, :total_weight],
+          event_name: [:elixirgateway, :load_distribution, :total_weight],
+          description: "Sum of all active node weights",
+          measurement: :weight
+        ),
+        last_value(
+          [:elixirgateway, :load_distribution, :enabled],
+          event_name: [:elixirgateway, :load_distribution, :enabled],
+          description: "Whether load distribution is enabled (1=yes, 0=no)",
+          measurement: :status
+        ),
+        last_value(
+          [:elixirgateway, :load_distribution, :below_threshold],
+          event_name: [:elixirgateway, :load_distribution, :below_threshold],
+          description: "Whether traffic is below minimum threshold (1=yes, 0=no)",
+          measurement: :status
+        )
+      ]
+    )
+  end
+
   defp gateway_request_metrics do
     Event.build(
       :gateway_request_metrics,
@@ -185,6 +229,37 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           unit: {:native, :second},
           tags: [:method, :target_service],
           reporter_options: [buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]]
+        )
+      ]
+    )
+  end
+
+  defp load_distribution_event_metrics do
+    Event.build(
+      :load_distribution_event_metrics,
+      [
+        counter(
+          [:elixirgateway, :load_distribution, :request, :total],
+          event_name: [:elixirgateway, :load_distribution, :request],
+          description: "Total requests routed to each node",
+          tags: [:target_node]
+        )
+      ]
+    )
+  end
+
+  defp rpc_forwarding_metrics do
+    Event.build(
+      :rpc_forwarding_metrics,
+      [
+        distribution(
+          [:elixirgateway, :rpc, :forward, :duration, :milliseconds],
+          event_name: [:elixirgateway, :rpc, :forward],
+          description: "RPC forwarding latency in milliseconds",
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          tags: [:destination_node, :status],
+          reporter_options: [buckets: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000]]
         )
       ]
     )
@@ -299,5 +374,47 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
     :telemetry.execute([:elixirgateway, :session_registry, :active_sessions], %{
       count: session_count
     })
+  end
+
+  def execute_load_distribution do
+    # Check if LoadDistributor is running
+    case Process.whereis(ElixirGateway.Cluster.LoadDistributor) do
+      nil ->
+        # Load distributor not running - emit default metrics
+        :telemetry.execute([:elixirgateway, :load_distribution, :enabled], %{status: 0})
+        :telemetry.execute([:elixirgateway, :load_distribution, :total_weight], %{weight: 0})
+        :telemetry.execute([:elixirgateway, :load_distribution, :below_threshold], %{status: 0})
+
+      _pid ->
+        # Get load distribution status
+        enabled = if ElixirGateway.Cluster.LoadDistributor.enabled?(), do: 1, else: 0
+
+        below_threshold =
+          if ElixirGateway.Cluster.LoadDistributor.below_traffic_threshold?(), do: 1, else: 0
+
+        total_weight = ElixirGateway.Cluster.LoadDistributor.get_total_active_weight()
+
+        # Emit status metrics
+        :telemetry.execute([:elixirgateway, :load_distribution, :enabled], %{status: enabled})
+
+        :telemetry.execute([:elixirgateway, :load_distribution, :below_threshold], %{
+          status: below_threshold
+        })
+
+        :telemetry.execute([:elixirgateway, :load_distribution, :total_weight], %{
+          weight: total_weight
+        })
+
+        # Emit individual node weights
+        node_weights = ElixirGateway.Cluster.LoadDistributor.get_node_weights_for_metrics()
+
+        Enum.each(node_weights, fn {tags, weight} ->
+          :telemetry.execute(
+            [:elixirgateway, :load_distribution, :node, :weight],
+            %{weight: weight},
+            tags
+          )
+        end)
+    end
   end
 end
