@@ -82,9 +82,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         end
 
         duration = System.monotonic_time() - start_time
+        duration_ms = System.convert_time_unit(duration, :native, :millisecond)
         emit_rpc_telemetry(node, :ok, duration)
 
-        Logger.info("RPC forwarding successful - Status: #{status}, Node: #{node}")
+        Logger.info("Load distributor: RPC forwarding successful to #{node} - Status: #{status}, Duration: #{duration_ms}ms")
 
         conn
         |> put_response_headers(headers)
@@ -105,9 +106,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       {:badrpc, :nodedown} ->
         # Remote node is down - fallback to local processing
         duration = System.monotonic_time() - start_time
+        duration_ms = System.convert_time_unit(duration, :native, :millisecond)
         emit_rpc_telemetry(node, :nodedown, duration)
 
-        Logger.warning("Remote node down (#{node}), processing locally as fallback")
+        Logger.warning("Load distributor: Remote node down (#{node}), falling back to local processing (attempt took #{duration_ms}ms)")
 
         # Record local request since we're falling back
         if Config.load_distribution_enabled?() do

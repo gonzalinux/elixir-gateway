@@ -59,13 +59,18 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   """
   def select_node_for_new_session do
     if enabled?() do
+      {total_weight, weights} = get_active_node_weights()
+
       if below_traffic_threshold?() do
-        Logger.debug("Traffic below threshold, routing to local node")
+        Logger.info("Load distributor: Traffic below threshold, routing to local node (active nodes: #{map_size(weights)}, total weight: #{total_weight})")
         node()
       else
-        node = weighted_random_node()
-        Logger.debug("Selected node via weighted distribution: #{node}")
-        node
+        selected_node = weighted_random_node()
+        node_weight = get_in(weights, [selected_node, :weight]) || 0
+        percentage = if total_weight > 0, do: Float.round(node_weight / total_weight * 100, 1), else: 0
+
+        Logger.info("Load distributor: Selected #{selected_node} for new session (weight: #{node_weight}/#{total_weight} = #{percentage}%)")
+        selected_node
       end
     else
       node()
@@ -192,12 +197,13 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
       # Schedule cleanup of old request data
       schedule_cleanup()
 
-      Logger.info(
-        "LoadDistributor started with configuration: #{inspect(load_distribution_config())}"
-      )
-
       config = load_distribution_config()
       weight = config[:node_weight] || 100
+      min_threshold = config[:min_requests_threshold] || 20
+
+      Logger.info(
+        "Load distributor: ENABLED - This node weight: #{weight}, min threshold: #{min_threshold} req/min, initial total weight: #{weight}"
+      )
 
       {:ok,
        %{
@@ -273,14 +279,16 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
 
     state =
       if elem != nil do
-        total_weight = state.total_weight - elem.weight
+        old_total = state.total_weight
+        new_total = state.total_weight - elem.weight
         nodes = Map.delete(state.nodes, peer_node)
-        %{state | total_weight: total_weight, nodes: nodes}
+
+        Logger.info("Load distributor: Node disconnected #{peer_node} (weight: #{elem.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}")
+
+        %{state | total_weight: new_total, nodes: nodes}
       else
         state
       end
-
-    Logger.debug("Removed node from load distribution: #{peer_node}")
 
     {:noreply, state}
   end
@@ -302,20 +310,23 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   @impl true
   def handle_call({:remote_node_weight, new_weight}, _from, state) do
     elem = Map.get(state.nodes, new_weight.node)
+    old_total = state.total_weight
 
     state =
       if elem != nil do
+        # Node already exists, subtract old weight
         total_weight = state.total_weight - elem.weight
         %{state | total_weight: total_weight}
       else
         state
       end
 
-    Logger.debug("Added node from load distribution: #{new_weight.node} #{new_weight.weight}")
-
     nodes = Map.put(state.nodes, new_weight.node, new_weight)
-    total_weight = state.total_weight + new_weight.weight
-    state = %{state | nodes: nodes, total_weight: total_weight}
+    new_total = state.total_weight + new_weight.weight
+    state = %{state | nodes: nodes, total_weight: new_total}
+
+    Logger.info("Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}")
+
     {:reply, :ok, state}
   end
 
