@@ -1,6 +1,6 @@
 defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
   use ExUnit.Case, async: false
-  use Plug.Test
+  import Plug.Test
 
   alias ElixirGatewayWeb.Plugs.LoadDistributionRouter
   alias ElixirGateway.Cluster.{ConnectionRegistry, LoadDistributor}
@@ -17,8 +17,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
       peers: [],
       load_distribution: [
         enabled: true,
-        primary_weight: 70,
-        secondary_weights: %{},
+        node_weight: 70,
         min_requests_threshold: 20,
         window_seconds: 60
       ]
@@ -60,7 +59,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 1})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("x-session-id", "test-session-123")
+        |> Plug.Conn.put_req_header("x-session-id", "test-session-123")
 
       conn1 = LoadDistributionRouter.call(conn1, [])
       assert conn1.assigns[:target_node] == :local
@@ -70,7 +69,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 1})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("x-session-id", "test-session-123")
+        |> Plug.Conn.put_req_header("x-session-id", "test-session-123")
 
       conn2 = LoadDistributionRouter.call(conn2, [])
       assert conn2.assigns[:target_node] == :local
@@ -92,7 +91,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 1})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("x-session-id", "remote-session-456")
+        |> Plug.Conn.put_req_header("x-session-id", "remote-session-456")
 
       conn = LoadDistributionRouter.call(conn, [])
 
@@ -111,7 +110,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 2})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("x-session-id", "new-session-above-threshold")
+        |> Plug.Conn.put_req_header("x-session-id", "new-session-above-threshold")
 
       conn = LoadDistributionRouter.call(conn, [])
 
@@ -153,16 +152,16 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 3})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("x-session-id", "registration-test-123")
+        |> Plug.Conn.put_req_header("x-session-id", "registration-test-123")
 
-      conn = LoadDistributionRouter.call(conn, [])
+      _conn = LoadDistributionRouter.call(conn, [])
 
       # Verify session was registered
       conn2 =
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 3})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("x-session-id", "registration-test-123")
+        |> Plug.Conn.put_req_header("x-session-id", "registration-test-123")
 
       result = ConnectionRegistry.get_node(conn2)
       assert result == :local
@@ -187,7 +186,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
         conn(:get, "/test")
         |> Map.put(:remote_ip, {127, 0, 0, 5})
         |> Plug.Conn.fetch_cookies()
-        |> put_req_header("sec-websocket-key", "websocket-key-123")
+        |> Plug.Conn.put_req_header("sec-websocket-key", "websocket-key-123")
 
       conn = LoadDistributionRouter.call(conn, [])
 

@@ -420,48 +420,37 @@ LOAD_DISTRIBUTION_ENABLED="false"
 - Secondary nodes accept and process forwarded requests
 - Session affinity is maintained across requests
 
-### PRIMARY_WEIGHT
+### NODE_WEIGHT
 **Type:** Integer
 **Required:** No
 **Default:** 70
 **Used in:** `lib/elixir_gateway/cluster/load_distributor.ex`
 
-Weight (capacity points) for the primary node. Traffic is distributed proportionally across all active nodes based on their weights.
+Weight (capacity points) for this node. Each node in the cluster declares its own weight based on its hardware capacity. Traffic is distributed proportionally across all active nodes based on their declared weights.
+
+When nodes connect to the cluster, they automatically share their weights via RPC. The primary node (receiving DNS traffic) uses these weights to calculate traffic distribution.
 
 ```bash
-# Default weight
-PRIMARY_WEIGHT="70"
+# Home server (high capacity)
+NODE_WEIGHT="70"
 
-# Higher capacity primary
-PRIMARY_WEIGHT="100"
+# Cloud server (medium capacity)
+NODE_WEIGHT="30"
+
+# Small cloud server (lower capacity)
+NODE_WEIGHT="15"
 ```
 
 **Weight Distribution Examples:**
-- Primary alone: 70 points = 100%
-- Primary + Cloud1: 70 + 30 = 100 points → 70% / 30%
-- Primary + 2 Clouds: 70 + 30 + 15 = 115 points → 60.9% / 26.1% / 13%
+- Single node: 70 points = 100% (all traffic local)
+- Home (70) + Cloud1 (30): Total 100 points → 70% / 30% distribution
+- Home (70) + Cloud1 (30) + Cloud2 (15): Total 115 points → 60.9% / 26.1% / 13% distribution
 
-### SECONDARY_WEIGHTS
-**Type:** String (formatted)
-**Required:** Yes (if load distribution enabled and you have secondary nodes)
-**Default:** Empty
-**Format:** `node_name:weight,node_name:weight,...`
-**Used in:** `lib/elixir_gateway/cluster/load_distributor.ex`
-
-Comma-separated list of secondary nodes and their weights. Node names must match the actual Erlang node names in the format `name@host`.
-
-```bash
-# Single secondary
-SECONDARY_WEIGHTS="gateway-cloud1@cloud.example.com:30"
-
-# Multiple secondaries with different capacities
-SECONDARY_WEIGHTS="gateway-cloud1@cloud.example.com:30,gateway-cloud2@cloud2.example.com:15"
-
-# Empty if no secondaries
-SECONDARY_WEIGHTS=""
-```
-
-**Important:** Node names must exactly match the Erlang node names used in clustering (format: `name@host`).
+**How It Works:**
+- Each node sets `NODE_WEIGHT` based on its actual capacity
+- On cluster connection, nodes exchange weights automatically via RPC
+- No centralized configuration needed
+- Add/remove nodes without updating other nodes' configs
 
 ### MIN_REQ_THRESHOLD
 **Type:** Integer
@@ -501,12 +490,11 @@ DDNS_DOMAINS="@:example.com:password"
 
 # Load Distribution
 LOAD_DISTRIBUTION_ENABLED="true"
-PRIMARY_WEIGHT="70"
-SECONDARY_WEIGHTS="gateway-cloud1@cloud1.example.com:30,gateway-cloud2@cloud2.example.com:15"
+NODE_WEIGHT="70"
 MIN_REQ_THRESHOLD="20"
 ```
 
-**Secondary Server (Cloud1) - Accepts forwarded requests:**
+**Secondary Server (Cloud1) - Shares load:**
 ```bash
 # Clustering
 CLUSTER_ENABLED="true"
@@ -515,11 +503,13 @@ NODE_NAME="gateway-cloud1"
 CLUSTER_PEERS=""  # Empty - accepts connections only
 IS_PRIMARY="false"
 
-# Load Distribution - disabled on secondary
-LOAD_DISTRIBUTION_ENABLED="false"
+# Load Distribution - enabled with medium capacity weight
+LOAD_DISTRIBUTION_ENABLED="true"
+NODE_WEIGHT="30"
+MIN_REQ_THRESHOLD="20"
 ```
 
-**Secondary Server (Cloud2) - Accepts forwarded requests:**
+**Secondary Server (Cloud2) - Shares load:**
 ```bash
 # Clustering
 CLUSTER_ENABLED="true"
@@ -528,8 +518,10 @@ NODE_NAME="gateway-cloud2"
 CLUSTER_PEERS=""  # Empty - accepts connections only
 IS_PRIMARY="false"
 
-# Load Distribution - disabled on secondary
-LOAD_DISTRIBUTION_ENABLED="false"
+# Load Distribution - enabled with lower capacity weight
+LOAD_DISTRIBUTION_ENABLED="true"
+NODE_WEIGHT="15"
+MIN_REQ_THRESHOLD="20"
 ```
 
 ### Monitoring Load Distribution

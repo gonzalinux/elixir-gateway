@@ -30,6 +30,12 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   use GenServer
   require Logger
 
+  @typedoc "Node weights shared when connected"
+  @type node_weights :: %{
+          weight: integer(),
+          node: node()
+        }
+
   @table_name :elixirgateway_load_distributor
   @request_window_seconds 60
   @cleanup_interval_ms 10_000
@@ -72,14 +78,12 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   - Random value 70-99 → Cloud1
   """
   def weighted_random_node do
-    weights = get_active_node_weights()
+    {total_weight, weights} = get_active_node_weights()
 
     if map_size(weights) == 0 do
       # No weights configured or no nodes active
       node()
     else
-      total_weight = weights |> Map.values() |> Enum.sum()
-
       if total_weight == 0 do
         node()
       else
@@ -96,29 +100,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   Always includes the current node (primary).
   """
   def get_active_node_weights do
-    config = load_distribution_config()
-
-    if config[:enabled] do
-      primary_weight = config[:primary_weight] || 70
-      secondary_weights = config[:secondary_weights] || %{}
-
-      # Get list of connected nodes
-      connected_nodes = [node() | Node.list()]
-
-      # Start with primary node
-      weights = %{node() => primary_weight}
-
-      # Add secondary nodes that are connected
-      Enum.reduce(secondary_weights, weights, fn {node_name, weight}, acc ->
-        if node_name in connected_nodes do
-          Map.put(acc, node_name, weight)
-        else
-          acc
-        end
-      end)
-    else
-      %{node() => 100}
-    end
+    GenServer.call(__MODULE__, :get_weights)
   end
 
   @doc """
@@ -180,9 +162,8 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   Used for metrics.
   """
   def get_total_active_weight do
-    get_active_node_weights()
-    |> Map.values()
-    |> Enum.sum()
+    {total_weight, _} = get_active_node_weights()
+    total_weight
   end
 
   @doc """
@@ -190,8 +171,10 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   Returns a list of tuples: [{node_name, weight}, ...]
   """
   def get_node_weights_for_metrics do
-    get_active_node_weights()
-    |> Enum.map(fn {node_name, weight} ->
+    {_total, nodes} = get_active_node_weights()
+
+    nodes
+    |> Enum.map(fn {_node_key, %{node: node_name, weight: weight}} ->
       {[node_name: to_string(node_name)], weight}
     end)
   end
@@ -203,7 +186,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
     if enabled?() do
       # Create ETS table for request tracking
       :ets.new(@table_name, [:named_table, :set, :public, read_concurrency: true])
-
+      :net_kernel.monitor_nodes(true, node_type: :all)
       # Schedule cleanup of old request data
       schedule_cleanup()
 
@@ -211,7 +194,15 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
         "LoadDistributor started with configuration: #{inspect(load_distribution_config())}"
       )
 
-      {:ok, %{}}
+      config = load_distribution_config()
+      weight = config[:node_weight] || 100
+
+      {:ok,
+       %{
+         node_weight: weight,
+         total_weight: weight,
+         nodes: %{node() => %{node: node(), weight: weight}}
+       }}
     else
       Logger.info("LoadDistributor disabled")
       {:ok, %{}, :hibernate}
@@ -247,12 +238,92 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
     {:noreply, state}
   end
 
+  @impl true
+  def handle_info({:nodeup, peer_node, _info}, state) do
+    # Broadcast weight to peer asynchronously to avoid blocking GenServer
+    node_weight = state.node_weight
+
+    Task.start(fn ->
+      case :rpc.call(
+             peer_node,
+             __MODULE__,
+             :remote_node_weight,
+             [%{node: node(), weight: node_weight}],
+             30_000
+           ) do
+        :ok ->
+          Logger.debug("Successfully shared weight with peer #{peer_node}")
+
+        {:badrpc, reason} ->
+          Logger.warning("Failed to share weight with peer #{peer_node}: #{inspect(reason)}")
+
+        other ->
+          Logger.warning("Unexpected response from peer #{peer_node}: #{inspect(other)}")
+      end
+    end)
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodedown, peer_node, _info}, state) do
+    elem = Map.get(state.nodes, peer_node)
+
+    state =
+      if elem != nil do
+        total_weight = state.total_weight - elem.weight
+        nodes = Map.delete(state.nodes, peer_node)
+        %{state | total_weight: total_weight, nodes: nodes}
+      else
+        state
+      end
+
+    Logger.debug("Removed node from load distribution: #{peer_node}")
+
+    {:noreply, state}
+  end
+
+  @doc """
+  RPC endpoint called when a node joins the cluster to broadcast its weight.
+  """
+  @spec remote_node_weight(node_weights()) :: :ok | {:error, term()}
+  def remote_node_weight(new_weights) do
+    # TODO HARDCODED
+    GenServer.call(__MODULE__, {:remote_node_weight, new_weights}, 30_000)
+  end
+
+  @impl true
+  def handle_call(:get_weights, _from, state) do
+    {:reply, {state.total_weight, state.nodes}, state}
+  end
+
+  @impl true
+  def handle_call(:remote_node_weight, new_weight, state) do
+    elem = Map.get(state.nodes, new_weight.node)
+
+    state =
+      if elem != nil do
+        total_weight = state.total_weight - elem.weight
+        %{state | total_weight: total_weight}
+      else
+        state
+      end
+
+    Logger.debug("Added node from load distribution: #{new_weight.node} #{new_weight.weight}")
+
+    nodes = Map.put(state.nodes, new_weight.node, new_weight)
+    total_weight = state.total_weight + new_weight.weight
+    state = %{state | nodes: nodes, total_weight: total_weight}
+    {:reply, :ok, state}
+  end
+
   # Private Functions
 
   defp select_by_cumulative_weight(weights, random_value) do
     weights
-    |> Enum.sort_by(fn {_node, _weight} -> :rand.uniform() end)
-    |> Enum.reduce_while({0, node()}, fn {node_name, weight}, {cumulative, _} ->
+    |> Enum.sort_by(fn {_node_key, _node_info} -> :rand.uniform() end)
+    |> Enum.reduce_while({0, node()}, fn {_node_key, %{node: node_name, weight: weight}},
+                                         {cumulative, _} ->
       new_cumulative = cumulative + weight
 
       if random_value <= new_cumulative do

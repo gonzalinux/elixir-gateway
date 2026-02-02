@@ -70,27 +70,35 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Load
 #### Active-Active Load Distribution (Optional)
 - **`LoadDistributor`** - Weight-based load distribution across cluster nodes
 - Intelligent traffic routing: Primary node receives all DNS traffic and distributes load proportionally
-- Weight-based allocation:
-  - Primary (home): 70 points = 60.9% traffic (with 2 clouds)
-  - Secondary (cloud1): 30 points = 26.1% traffic
-  - Secondary (cloud2): 15 points = 13.0% traffic
+- **Dynamic weight discovery**: Each node declares its own weight; no centralized configuration needed
+- Weight-based allocation example (if nodes declare these weights):
+  - Home node: 70 points = 60.9% traffic (with 2 clouds)
+  - Cloud1 node: 30 points = 26.1% traffic
+  - Cloud2 node: 15 points = 13.0% traffic
 - Traffic threshold: Routes all traffic locally when below 20 req/min (configurable)
 - Dynamic adjustment: Automatically recalculates weights when nodes connect/disconnect
 - Session affinity: Maintains sticky sessions across requests
 - RPC forwarding: Transparent request forwarding to remote nodes via Erlang RPC
 - Graceful degradation: Falls back to local processing if remote node is down
-- Flexible scaling: Add/remove secondary nodes without reconfiguration
+- Flexible scaling: Add/remove nodes without reconfiguration (they auto-share weights via RPC)
 
 **Configuration**:
 ```bash
-# Primary server (home) - receives all DNS traffic
+# Each node declares its own weight based on capacity
+# Home server (high capacity, receives all DNS traffic)
 export LOAD_DISTRIBUTION_ENABLED=true
-export PRIMARY_WEIGHT=70
-export SECONDARY_WEIGHTS="gateway-cloud1@cloud.example.com:30,gateway-cloud2@cloud2.example.com:15"
+export NODE_WEIGHT=70
 export MIN_REQ_THRESHOLD=20
 
-# Secondary servers (cloud) - accept forwarded requests
-export LOAD_DISTRIBUTION_ENABLED=false  # Receive only, don't distribute
+# Cloud server 1 (medium capacity)
+export LOAD_DISTRIBUTION_ENABLED=true
+export NODE_WEIGHT=30
+export MIN_REQ_THRESHOLD=20
+
+# Cloud server 2 (lower capacity)
+export LOAD_DISTRIBUTION_ENABLED=true
+export NODE_WEIGHT=15
+export MIN_REQ_THRESHOLD=20
 ```
 
 **How It Works**:
@@ -226,3 +234,5 @@ export CLUSTER_PEERS=""  # Empty, accepts connections
 - Proper header filtering during proxying (removes hop-by-hop headers)
 - No sensitive information in logs
 - Environment-based secret management
+
+## Try to use with statements instead of nested case statements

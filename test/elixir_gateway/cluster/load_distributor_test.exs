@@ -15,7 +15,7 @@ defmodule ElixirGateway.Cluster.LoadDistributorTest do
       peers: [],
       load_distribution: [
         enabled: true,
-        primary_weight: 70,
+        node_weight: 70,
         secondary_weights: %{},
         min_requests_threshold: 20,
         window_seconds: 60
@@ -59,29 +59,22 @@ defmodule ElixirGateway.Cluster.LoadDistributorTest do
 
   describe "get_active_node_weights/0" do
     test "returns only primary node when no secondaries configured" do
-      weights = LoadDistributor.get_active_node_weights()
+      {total_weight, weights} = LoadDistributor.get_active_node_weights()
 
       assert map_size(weights) == 1
-      assert weights[node()] == 70
+      assert weights[node()].weight == 70
+      assert total_weight == 70
     end
 
     test "includes connected secondary nodes" do
-      # Add secondary weights to config (these nodes don't exist, so they won't be included)
-      cluster_config = Application.get_env(:elixirgateway, :cluster)
+      # With dynamic peer discovery, secondary nodes are only included when actually connected
+      # Since we can't easily connect real nodes in tests, this test verifies the single node case
+      {total_weight, weights} = LoadDistributor.get_active_node_weights()
 
-      updated_config =
-        put_in(cluster_config[:load_distribution][:secondary_weights], %{
-          :"gateway-cloud1@localhost" => 30,
-          :"gateway-cloud2@localhost" => 15
-        })
-
-      Application.put_env(:elixirgateway, :cluster, updated_config)
-
-      weights = LoadDistributor.get_active_node_weights()
-
-      # Only primary should be included since secondary nodes are not connected
+      # Only local node should be included since secondary nodes are not connected
       assert map_size(weights) == 1
-      assert weights[node()] == 70
+      assert weights[node()].weight == 70
+      assert total_weight == 70
     end
   end
 
@@ -198,11 +191,11 @@ defmodule ElixirGateway.Cluster.LoadDistributorTest do
 
   describe "weight distribution calculations" do
     test "primary alone represents 100% of weight" do
-      weights = LoadDistributor.get_active_node_weights()
+      {_total_weight, weights} = LoadDistributor.get_active_node_weights()
       total = LoadDistributor.get_total_active_weight()
 
-      primary_weight = weights[node()]
-      primary_percentage = primary_weight / total * 100
+      node_weight = weights[node()].weight
+      primary_percentage = node_weight / total * 100
 
       assert_in_delta(primary_percentage, 100.0, 0.1)
     end

@@ -292,18 +292,14 @@ Each node is assigned a **capacity weight** (points). Traffic is distributed pro
 
 ### Configuration
 
-#### Primary Server (Home) - Distributes Load
+#### Primary Server (Home) - Receives DNS Traffic
 
 ```bash
 # Enable load distribution
 LOAD_DISTRIBUTION_ENABLED=true
 
-# Primary node weight (default: 70)
-PRIMARY_WEIGHT=70
-
-# Secondary node weights (format: "node_name:weight,node_name:weight")
-# Node names must match the actual Erlang node names
-SECONDARY_WEIGHTS="gateway-cloud1@cloud.example.com:30,gateway-cloud2@cloud2.example.com:15"
+# This node's capacity weight (higher = more traffic)
+NODE_WEIGHT=70
 
 # Minimum requests per minute before distribution kicks in (default: 20)
 MIN_REQ_THRESHOLD=20
@@ -315,11 +311,17 @@ NODE_NAME=gateway-home
 CLUSTER_PEERS=cloud.example.com:9100
 ```
 
-#### Secondary Servers (Cloud) - Accept Forwarded Requests
+#### Secondary Servers (Cloud) - Share Load
 
 ```bash
-# Disable distribution (just accept forwarded requests)
-LOAD_DISTRIBUTION_ENABLED=false
+# Enable load distribution (nodes auto-share weights via RPC)
+LOAD_DISTRIBUTION_ENABLED=true
+
+# This node's capacity weight (adjust based on server capacity)
+NODE_WEIGHT=30
+
+# Same threshold as primary
+MIN_REQ_THRESHOLD=20
 
 # Cluster configuration (required)
 CLUSTER_ENABLED=true
@@ -328,6 +330,12 @@ NODE_NAME=gateway-cloud1
 CLUSTER_PEERS=  # Empty - accepts connections
 IS_PRIMARY=false
 ```
+
+**How It Works:**
+- Each node declares its own `NODE_WEIGHT` based on its capacity
+- When nodes connect, they automatically share weights via RPC
+- The primary (DNS target) calculates traffic distribution dynamically
+- No centralized weight configuration needed
 
 ### Complete Example
 
@@ -343,8 +351,7 @@ DDNS_DOMAINS=@:example.com:password
 
 # Load distribution
 LOAD_DISTRIBUTION_ENABLED=true
-PRIMARY_WEIGHT=70
-SECONDARY_WEIGHTS="gateway-cloud1@cloud1.example.com:30,gateway-cloud2@cloud2.example.com:15"
+NODE_WEIGHT=70
 MIN_REQ_THRESHOLD=20
 ```
 
@@ -355,7 +362,11 @@ CLUSTER_SECRET=abc123...
 NODE_NAME=gateway-cloud1
 CLUSTER_PEERS=  # Empty
 IS_PRIMARY=false
-LOAD_DISTRIBUTION_ENABLED=false
+
+# Load distribution with medium capacity
+LOAD_DISTRIBUTION_ENABLED=true
+NODE_WEIGHT=30
+MIN_REQ_THRESHOLD=20
 ```
 
 **Cloud Server 2:**
@@ -365,7 +376,11 @@ CLUSTER_SECRET=abc123...
 NODE_NAME=gateway-cloud2
 CLUSTER_PEERS=  # Empty
 IS_PRIMARY=false
-LOAD_DISTRIBUTION_ENABLED=false
+
+# Load distribution with lower capacity
+LOAD_DISTRIBUTION_ENABLED=true
+NODE_WEIGHT=15
+MIN_REQ_THRESHOLD=20
 ```
 
 ### Monitoring & Metrics
@@ -466,23 +481,24 @@ When traffic **exceeds** the threshold:
 ### Dynamic Node Management
 
 **Adding a New Secondary:**
-1. Configure new node with clustering enabled
-2. Add node's weight to `SECONDARY_WEIGHTS` on primary
-3. Restart primary (or wait for config reload)
-4. New node immediately participates in distribution
+1. Configure new node with clustering enabled and set `NODE_WEIGHT`
+2. Start the new node (connects to cluster automatically)
+3. Node shares its weight via RPC when connecting
+4. LoadDistributor immediately includes it in traffic distribution
+5. No configuration changes needed on other nodes
 
 **Removing a Secondary:**
 1. Stop the secondary node
-2. LoadDistributor automatically excludes it from weights
-3. Traffic automatically redistributes to remaining nodes
-4. Update `SECONDARY_WEIGHTS` to clean up config (optional)
+2. LoadDistributor detects `:nodedown` event automatically
+3. Removes node from weight calculation immediately
+4. Traffic redistributes to remaining nodes
+5. No manual intervention required
 
 ### Troubleshooting
 
 **Issue: All traffic goes to primary even when above threshold**
 - Check `LOAD_DISTRIBUTION_ENABLED=true` on primary
 - Verify secondary nodes are connected: Check cluster health metrics
-- Confirm node names in `SECONDARY_WEIGHTS` match actual Erlang node names
 - Check logs for "Selected node via weighted distribution"
 
 **Issue: High RPC latency**

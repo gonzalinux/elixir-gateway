@@ -108,28 +108,9 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
   # Parse load distribution configuration
   load_distribution_config =
     if System.get_env("LOAD_DISTRIBUTION_ENABLED") == "true" do
-      # Parse secondary weights from comma-separated format:
-      # "gateway-cloud1@host:port:30,gateway-cloud2@host:port:15"
-      secondary_weights =
-        System.get_env("SECONDARY_WEIGHTS", "")
-        |> String.split(",", trim: true)
-        |> Enum.map(fn entry ->
-          case String.split(entry, ":", trim: true) do
-            # Format: node_name:weight
-            [node_name, weight_str] ->
-              {String.to_atom(node_name), String.to_integer(weight_str)}
-
-            _ ->
-              nil
-          end
-        end)
-        |> Enum.reject(&is_nil/1)
-        |> Map.new()
-
       [
         enabled: true,
-        primary_weight: String.to_integer(System.get_env("PRIMARY_WEIGHT", "70")),
-        secondary_weights: secondary_weights,
+        node_weight: String.to_integer(System.get_env("NODE_WEIGHT", "70")),
         min_requests_threshold: String.to_integer(System.get_env("MIN_REQ_THRESHOLD", "20")),
         window_seconds: 60
       ]
