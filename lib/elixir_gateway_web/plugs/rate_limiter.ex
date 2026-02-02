@@ -13,6 +13,12 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
     user_requests_per_minute = Keyword.get(rate_limit_config, :user_requests_per_minute, 100)
     ip_requests_per_minute = Keyword.get(rate_limit_config, :ip_requests_per_minute, 500)
 
+    # Debug log on first request
+    unless Process.get(:rate_limit_logged) do
+      Logger.info("Rate limiter: User limit=#{user_requests_per_minute}/min, IP limit=#{ip_requests_per_minute}/min")
+      Process.put(:rate_limit_logged, true)
+    end
+
     {user_id, ip_address} = get_identifiers(conn)
 
     # Check user-based rate limit first (more restrictive)
