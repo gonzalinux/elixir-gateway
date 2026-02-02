@@ -412,7 +412,7 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           :telemetry.execute(
             [:elixirgateway, :load_distribution, :node, :weight],
             %{weight: weight},
-            tags
+            Map.new(tags)
           )
         end)
     end
