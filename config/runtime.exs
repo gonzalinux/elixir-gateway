@@ -48,9 +48,6 @@ if System.get_env("RATE_LIMIT_USER") || System.get_env("RATE_LIMIT_IP") do
   user_limit = String.to_integer(System.get_env("RATE_LIMIT_USER", "100"))
   ip_limit = String.to_integer(System.get_env("RATE_LIMIT_IP", "500"))
 
-  IO.puts("Runtime config: Setting rate limits - User: #{user_limit}/min, IP: #{ip_limit}/min")
-
-  # Override just the rate_limit part of gateway config
   config :elixirgateway, :gateway,
     rate_limit: [
       user_requests_per_minute: user_limit,
