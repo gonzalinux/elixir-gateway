@@ -592,6 +592,106 @@ curl http://192.168.1.10:4000/metrics
 - Never commit the token to version control
 - Recommended for production deployments, especially in cloud environments
 
+### RATE_LIMIT_USER
+**Type:** Integer
+**Required:** No
+**Default:** 100
+**Used in:** `lib/elixir_gateway_web/plugs/rate_limiter.ex`
+
+Maximum number of requests per minute allowed per authenticated user or authorization token.
+
+```bash
+# Default (100 requests per minute per user)
+RATE_LIMIT_USER="100"
+
+# Higher limit for production
+RATE_LIMIT_USER="1000"
+
+# Very high limit for testing
+RATE_LIMIT_USER="10000"
+```
+
+**Notes:**
+- Users are identified by `X-User-ID` header, `Authorization` header, or fall back to IP address
+- Exceeding this limit returns HTTP 429 (Too Many Requests)
+- Limit is per-user per-minute with a 60-second rolling window
+
+### RATE_LIMIT_IP
+**Type:** Integer
+**Required:** No
+**Default:** 500
+**Used in:** `lib/elixir_gateway_web/plugs/rate_limiter.ex`
+
+Maximum number of requests per minute allowed per IP address (secondary limit after user-based limiting).
+
+```bash
+# Default (500 requests per minute per IP)
+RATE_LIMIT_IP="500"
+
+# Higher limit for production with many users behind NAT
+RATE_LIMIT_IP="5000"
+
+# Very high limit for testing
+RATE_LIMIT_IP="100000"
+```
+
+**Notes:**
+- IP-based limit is checked after user-based limit
+- Helps prevent abuse when multiple users share the same authentication
+- Uses `X-Forwarded-For` header when behind proxy
+
+### BOT_BLOCKER_ENABLED
+**Type:** Boolean ("true" or "false")
+**Required:** No
+**Default:** "true"
+**Used in:** `lib/elixir_gateway_web/plugs/bot_blocker.ex`
+
+Enable automatic blocking of malicious bots and vulnerability scanners.
+
+```bash
+# Enable (recommended for production)
+BOT_BLOCKER_ENABLED="true"
+
+# Disable (for testing/debugging)
+BOT_BLOCKER_ENABLED="false"
+```
+
+**What it blocks:**
+- PHP file requests (`.php`, `.asp`, `.aspx`)
+- WordPress exploit attempts (`wp-admin`, `wp-config`, etc.)
+- Database admin tools (`phpmyadmin`, `adminer`)
+- Environment file access (`.env`, `.git`)
+- Common backdoor/shell patterns
+
+**Behavior:**
+- IPs are blocked immediately upon first suspicious request
+- Blocked IPs receive HTTP 403 (Forbidden)
+- Block duration controlled by `BOT_BLOCK_DURATION`
+
+### BOT_BLOCK_DURATION
+**Type:** Integer (seconds)
+**Required:** No
+**Default:** 3600 (1 hour)
+**Used in:** `lib/elixir_gateway_web/plugs/bot_blocker.ex`
+
+Duration in seconds to block IPs that trigger the bot blocker.
+
+```bash
+# 1 hour (default)
+BOT_BLOCK_DURATION="3600"
+
+# 24 hours
+BOT_BLOCK_DURATION="86400"
+
+# 5 minutes (for testing)
+BOT_BLOCK_DURATION="300"
+```
+
+**Notes:**
+- Blocks are stored in ETS (memory-only, cleared on restart)
+- Longer durations reduce load from persistent attackers
+- Consider your server's memory if setting very long durations with many attackers
+
 ## Development & Debugging
 
 Logging configuration is managed through `config/config.exs` and is currently hardcoded. Performance settings like HTTP client pool sizes are also configured in the application code rather than through environment variables.

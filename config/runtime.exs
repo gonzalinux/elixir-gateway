@@ -42,6 +42,36 @@ if metrics_token = System.get_env("METRICS_AUTH_TOKEN") do
   config :elixirgateway, :metrics_auth_token, metrics_token
 end
 
+# Rate limiting configuration (all environments)
+# Can be overridden with environment variables
+if System.get_env("RATE_LIMIT_USER") || System.get_env("RATE_LIMIT_IP") do
+  user_limit = String.to_integer(System.get_env("RATE_LIMIT_USER", "100"))
+  ip_limit = String.to_integer(System.get_env("RATE_LIMIT_IP", "500"))
+
+  # Get existing gateway config and merge rate_limit
+  gateway_config = Application.get_env(:elixirgateway, :gateway, [])
+
+  rate_limit_config = [
+    user_requests_per_minute: user_limit,
+    ip_requests_per_minute: ip_limit,
+    cleanup_interval: :timer.minutes(1)
+  ]
+
+  config :elixirgateway, :gateway,
+    Keyword.merge(gateway_config, rate_limit: rate_limit_config)
+end
+
+# Bot blocker configuration (all environments)
+if System.get_env("BOT_BLOCKER_ENABLED") do
+  enabled = System.get_env("BOT_BLOCKER_ENABLED") == "true"
+  block_duration = String.to_integer(System.get_env("BOT_BLOCK_DURATION", "3600"))
+
+  config :elixirgateway, :bot_blocker,
+    enabled: enabled,
+    block_duration_seconds: block_duration,
+    max_404s_before_block: 10
+end
+
 # Native Erlang distribution clustering configuration (all environments)
 if System.get_env("CLUSTER_ENABLED") == "true" do
   secret =

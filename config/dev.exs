@@ -39,6 +39,12 @@ config :elixirgateway, :gateway,
     cleanup_interval: :timer.minutes(1)
   ]
 
+# Bot blocker configuration
+config :elixirgateway, :bot_blocker,
+  enabled: true,
+  block_duration_seconds: 3600,  # 1 hour
+  max_404s_before_block: 10
+
 # SiteEncrypt configuration for development
 config :site_encrypt, ElixirGateway.SiteEncrypt,
   # Use this endpoint for ACME HTTP-01 challenges

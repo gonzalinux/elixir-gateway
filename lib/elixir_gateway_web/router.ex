@@ -2,6 +2,7 @@ defmodule ElixirGatewayWeb.Router do
   use ElixirGatewayWeb, :router
 
   pipeline :gateway do
+    plug(ElixirGatewayWeb.Plugs.BotBlocker)
     plug(ElixirGatewayWeb.Plugs.RateLimiter)
     plug(ElixirGatewayWeb.Plugs.WebSocketUpgradePlug)
     plug(ElixirGatewayWeb.Plugs.DomainRouter)
