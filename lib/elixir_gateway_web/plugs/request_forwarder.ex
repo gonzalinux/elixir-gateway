@@ -425,5 +425,4 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       }
     )
   end
-
 end

@@ -12,8 +12,8 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   Each node is assigned a capacity weight (points). Load is distributed proportionally:
 
   - Primary (home) alone: 70 points = 100% distribution
-  - Primary + Cloud1: 70 + 30 = 100 points → 70%/30% distribution
-  - Primary + Cloud1 + Cloud2: 70 + 30 + 15 = 115 points → 60.9%/26.1%/13.0% distribution
+  - Primary + secondary1: 70 + 30 = 100 points → 70%/30% distribution
+  - Primary + secondary1 + secondary2: 70 + 30 + 15 = 115 points → 60.9%/26.1%/13.0% distribution
 
   ## Threshold Behavior
 
@@ -75,9 +75,9 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   @doc """
   Performs weighted random selection across active nodes.
 
-  Example: Primary=70, Cloud1=30 (total=100)
+  Example: Primary=70, secondary1=30 (total=100)
   - Random value 0-69 → Primary
-  - Random value 70-99 → Cloud1
+  - Random value 70-99 → secondary1
   """
   def weighted_random_node do
     {total_weight, weights} = get_active_node_weights()
@@ -323,7 +323,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
 
   defp select_by_cumulative_weight(weights, random_value) do
     weights
-    |> Enum.sort_by(fn {_node_key, _node_info} -> :rand.uniform() end)
+    |> Enum.sort_by(fn {node_key, _node_info} -> node_key end)
     |> Enum.reduce_while({0, node()}, fn {_node_key, %{node: node_name, weight: weight}},
                                          {cumulative, _} ->
       new_cumulative = cumulative + weight
