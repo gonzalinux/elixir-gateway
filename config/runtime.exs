@@ -50,17 +50,13 @@ if System.get_env("RATE_LIMIT_USER") || System.get_env("RATE_LIMIT_IP") do
 
   IO.puts("Runtime config: Setting rate limits - User: #{user_limit}/min, IP: #{ip_limit}/min")
 
-  # Get existing gateway config and merge rate_limit
-  gateway_config = Application.get_env(:elixirgateway, :gateway, [])
-
-  rate_limit_config = [
-    user_requests_per_minute: user_limit,
-    ip_requests_per_minute: ip_limit,
-    cleanup_interval: :timer.minutes(1)
-  ]
-
+  # Override just the rate_limit part of gateway config
   config :elixirgateway, :gateway,
-    Keyword.put(gateway_config, :rate_limit, rate_limit_config)
+    rate_limit: [
+      user_requests_per_minute: user_limit,
+      ip_requests_per_minute: ip_limit,
+      cleanup_interval: :timer.minutes(1)
+    ]
 end
 
 # Bot blocker configuration (all environments)
@@ -96,11 +92,8 @@ if services_str = System.get_env("GATEWAY_SERVICES") do
     end)
     |> Map.new()
 
-  # Get existing gateway config and merge services
-  gateway_config = Application.get_env(:elixirgateway, :gateway, [])
-
   config :elixirgateway, :gateway,
-    Keyword.put(gateway_config, :services, services)
+    services: services
 end
 
 # Native Erlang distribution clustering configuration (all environments)

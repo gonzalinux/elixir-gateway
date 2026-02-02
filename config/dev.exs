@@ -33,11 +33,8 @@ config :elixirgateway, :gateway,
   services: %{
     "default" => "http://localhost:8443",
     "localhost" => "http://localhost:8443"
-  },
-  rate_limit: [
-    requests_per_minute: 100,
-    cleanup_interval: :timer.minutes(1)
-  ]
+  }
+  # rate_limit is configured in runtime.exs via env vars
 
 # Bot blocker configuration
 config :elixirgateway, :bot_blocker,
