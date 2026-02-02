@@ -48,6 +48,8 @@ if System.get_env("RATE_LIMIT_USER") || System.get_env("RATE_LIMIT_IP") do
   user_limit = String.to_integer(System.get_env("RATE_LIMIT_USER", "100"))
   ip_limit = String.to_integer(System.get_env("RATE_LIMIT_IP", "500"))
 
+  IO.puts("Runtime config: Setting rate limits - User: #{user_limit}/min, IP: #{ip_limit}/min")
+
   # Get existing gateway config and merge rate_limit
   gateway_config = Application.get_env(:elixirgateway, :gateway, [])
 
