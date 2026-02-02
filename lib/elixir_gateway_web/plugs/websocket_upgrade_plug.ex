@@ -24,6 +24,10 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
         Logger.info("Forwarding request to remote node: #{node}")
         forward_to_node(conn, node)
 
+      :new_session ->
+        # New session - process locally, load distributor will handle it downstream
+        process_locally(conn, opts)
+
       :not_clustered ->
         # Clustering disabled, process locally
         process_locally(conn, opts)

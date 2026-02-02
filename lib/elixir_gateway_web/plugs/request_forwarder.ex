@@ -34,6 +34,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
             Logger.info("Request affinity points to remote node: #{node}")
             forward_to_remote_node(conn, node)
 
+          :new_session ->
+            # New session without load distribution routing - process locally
+            process_locally(conn, opts)
+
           :not_clustered ->
             process_locally(conn, opts)
         end
