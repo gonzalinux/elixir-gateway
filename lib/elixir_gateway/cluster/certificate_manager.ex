@@ -238,34 +238,20 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   @impl true
   def handle_info({:sync_to_new_peer, node}, %{role: :primary} = state) do
-    # Sync certificates to a newly connected peer
     Logger.info("Initiating automatic certificate sync to #{node}")
 
-    # Get the primary domain from SiteEncrypt config
-    case get_primary_domain() do
-      {:ok, domain} ->
-        # Check if certificates exist for this domain
-        case read_certificates(domain, state.db_folder) do
-          {:ok, _cert_bundle} ->
-            # Sync to the newly connected peer only
-            case broadcast_to_peer(node, domain, state) do
-              :ok ->
-                Logger.info("Successfully synced certificates to new peer #{node}")
-
-              {:error, reason} ->
-                Logger.warning(
-                  "Failed to sync certificates to new peer #{node}: #{inspect(reason)}"
-                )
-            end
-
-          {:error, reason} ->
-            Logger.debug(
-              "No certificates to sync for domain #{domain}: #{inspect(reason)}"
-            )
-        end
-
+    with {:ok, domain} <- get_primary_domain(),
+         {:ok, _cert_bundle} <- read_certificates(domain, state.db_folder),
+         :ok <- broadcast_to_peer(node, domain, state) do
+      Logger.info("Successfully synced certificates to new peer #{node}")
+    else
       {:error, :no_domains} ->
         Logger.debug("No domains configured, skipping automatic certificate sync")
+
+      {:error, reason} ->
+        # This handles errors from both read_certificates and broadcast_to_peer
+        # since they both return {:error, reason}
+        Logger.warning("Sync interrupted for #{node}: #{inspect(reason)}")
     end
 
     {:noreply, state}

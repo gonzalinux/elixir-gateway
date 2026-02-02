@@ -105,6 +105,19 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
       [enabled: false]
     end
 
+  # Parse load distribution configuration
+  load_distribution_config =
+    if System.get_env("LOAD_DISTRIBUTION_ENABLED") == "true" do
+      [
+        enabled: true,
+        node_weight: String.to_integer(System.get_env("NODE_WEIGHT", "70")),
+        min_requests_threshold: String.to_integer(System.get_env("MIN_REQ_THRESHOLD", "20")),
+        window_seconds: 60
+      ]
+    else
+      [enabled: false]
+    end
+
   # Application config for cluster module
   config :elixirgateway, :cluster,
     enabled: true,
@@ -113,7 +126,8 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
     node_ip: System.get_env("NODE_IP"),
     listen_port: listen_port,
     peers: peers,
-    dns_failover: dns_failover_config
+    dns_failover: dns_failover_config,
+    load_distribution: load_distribution_config
 end
 
 if config_env() == :prod do

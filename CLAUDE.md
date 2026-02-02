@@ -27,19 +27,27 @@ ElixirGateway is a high-performance API Gateway built with Phoenix that serves a
 
 ### Request Processing Pipeline
 ```
-Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Request Forwarder
+Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Load Distribution Router → Request Forwarder
 ```
+
+**Note**: LoadDistributionRouter is only active when load distribution is enabled. When disabled, requests flow directly from DomainRouter to RequestForwarder.
 
 ### Core Components
 
 #### Plugs (Request Processing)
 - **`DomainRouter`** - Maps domains to target services based on configuration
 - **`RateLimiter`** - Implements rate limiting (100 req/min default, uses Hammer)
+- **`LoadDistributionRouter`** - Routes requests across cluster nodes based on weights (optional)
+  - Weight-based distribution for active-active load balancing
+  - Session affinity preservation
+  - Traffic threshold detection (routes locally below 20 req/min)
+  - Dynamic adjustment when nodes connect/disconnect
 - **`RequestForwarder`** - Forwards HTTP requests using Finch client
   - Supports large file uploads up to 20MB
   - Chunked reading (1MB chunks) with 15-second timeout per chunk
   - Multipart form data handling
   - Extended timeouts (40 seconds for large transfers)
+  - RPC forwarding to remote nodes when load distribution is enabled
 - **`WebSocketUpgradePlug`** - Detects and handles WebSocket upgrade requests
 - **`MetricsAuthPlug`** - Protects `/metrics` endpoint with authentication
 
@@ -59,12 +67,64 @@ Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Requ
 - Configurable via `:cluster` config with `session_ttl_minutes` and `cleanup_interval_minutes`
 - Monitoring: `session_count/0` and Prometheus metric `elixirgateway_session_registry_active_sessions`
 
+#### Active-Active Load Distribution (Optional)
+- **`LoadDistributor`** - Weight-based load distribution across cluster nodes
+- Intelligent traffic routing: Primary node receives all DNS traffic and distributes load proportionally
+- **Dynamic weight discovery**: Each node declares its own weight; no centralized configuration needed
+- Weight-based allocation example (if nodes declare these weights):
+  - Home node: 70 points = 60.9% traffic (with 2 clouds)
+  - Cloud1 node: 30 points = 26.1% traffic
+  - Cloud2 node: 15 points = 13.0% traffic
+- Traffic threshold: Routes all traffic locally when below 20 req/min (configurable)
+- Dynamic adjustment: Automatically recalculates weights when nodes connect/disconnect
+- Session affinity: Maintains sticky sessions across requests
+- RPC forwarding: Transparent request forwarding to remote nodes via Erlang RPC
+- Graceful degradation: Falls back to local processing if remote node is down
+- Flexible scaling: Add/remove nodes without reconfiguration (they auto-share weights via RPC)
+
+**Configuration**:
+```bash
+# Each node declares its own weight based on capacity
+# Home server (high capacity, receives all DNS traffic)
+export LOAD_DISTRIBUTION_ENABLED=true
+export NODE_WEIGHT=70
+export MIN_REQ_THRESHOLD=20
+
+# Cloud server 1 (medium capacity)
+export LOAD_DISTRIBUTION_ENABLED=true
+export NODE_WEIGHT=30
+export MIN_REQ_THRESHOLD=20
+
+# Cloud server 2 (lower capacity)
+export LOAD_DISTRIBUTION_ENABLED=true
+export NODE_WEIGHT=15
+export MIN_REQ_THRESHOLD=20
+```
+
+**How It Works**:
+1. DNS points to primary (home) server
+2. Primary receives all traffic and makes routing decisions:
+   - Below threshold (<20 req/min): All traffic stays local
+   - Above threshold: New sessions distributed based on weights via RPC
+   - Existing sessions: Routed to assigned node (affinity preserved)
+3. Secondary nodes process forwarded requests via RPC calls
+4. If secondary is down: Automatic fallback to local processing
+
+**Monitoring**:
+- `elixirgateway_load_distribution_request_total{target_node}` - Requests per node
+- `elixirgateway_rpc_forward_duration_milliseconds` - RPC latency histogram
+- `elixirgateway_load_distribution_node_weight{node_name}` - Current node weights
+- `elixirgateway_load_distribution_total_weight` - Sum of active weights
+- `elixirgateway_load_distribution_enabled` - Feature status (1=on, 0=off)
+- `elixirgateway_load_distribution_below_threshold` - Traffic threshold status (1=below, 0=above)
+
 #### Monitoring
 - **PromEx integration** with custom gateway metrics
   - `elixirgateway_request_total` - Counter with labels: method, status, target_service, path, host
   - `elixirgateway_request_duration_milliseconds` - Histogram with labels: method, status, target_service, host
   - Path tracking sampled at 10% to manage cardinality
   - Cluster health metrics (peers connected, DNS failover state, session registry)
+  - Load distribution metrics (node weights, request distribution, RPC latency)
 - **`/metrics`** endpoint for Prometheus scraping
   - Token authentication (if `METRICS_AUTH_TOKEN` env var is set)
   - IP-based authentication (fallback, allows private networks only)
@@ -174,3 +234,5 @@ export CLUSTER_PEERS=""  # Empty, accepts connections
 - Proper header filtering during proxying (removes hop-by-hop headers)
 - No sensitive information in logs
 - Environment-based secret management
+
+## Try to use with statements instead of nested case statements

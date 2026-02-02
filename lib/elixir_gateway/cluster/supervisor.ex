@@ -39,6 +39,9 @@ defmodule ElixirGateway.Cluster.Supervisor do
         # Connection registry for distributed sticky sessions
         {ElixirGateway.Cluster.ConnectionRegistry, []},
 
+        # Load distributor for weight-based active-active load distribution
+        load_distributor_child(config),
+
         # Certificate synchronization manager
         certificate_manager_child(config),
 
@@ -48,6 +51,14 @@ defmodule ElixirGateway.Cluster.Supervisor do
       |> Enum.reject(&is_nil/1)
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp load_distributor_child(config) do
+    load_dist_config = Keyword.get(config, :load_distribution, [])
+
+    if Keyword.get(load_dist_config, :enabled, false) do
+      {ElixirGateway.Cluster.LoadDistributor, []}
+    end
   end
 
   defp certificate_manager_child(config) do

@@ -5,6 +5,7 @@ defmodule ElixirGatewayWeb.Router do
     plug(ElixirGatewayWeb.Plugs.RateLimiter)
     plug(ElixirGatewayWeb.Plugs.WebSocketUpgradePlug)
     plug(ElixirGatewayWeb.Plugs.DomainRouter)
+    plug(ElixirGatewayWeb.Plugs.LoadDistributionRouter)
     plug(ElixirGatewayWeb.Plugs.RequestForwarder)
   end
 

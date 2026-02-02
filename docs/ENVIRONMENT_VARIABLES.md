@@ -8,7 +8,8 @@ This document provides comprehensive documentation for all environment variables
 - [SSL/TLS Configuration](#ssltls-configuration)
 - [Application Configuration](#application-configuration)
 - [Clustering Configuration](#clustering-configuration)
-- [Network Configuration](#network-configuration)
+- [Load Distribution Configuration](#load-distribution-configuration)
+- [Metrics Configuration](#metrics-configuration)
 - [Development & Debugging](#development--debugging)
 
 ## Required Variables
@@ -393,6 +394,162 @@ DDNS_DOMAINS="@:example.com:pass1,@:mysite.org:pass2"
 - `api` = subdomain (api.example.com)
 - Use same password for all hosts under one domain
 
+## Load Distribution Configuration
+
+Active-active load distribution enables intelligent traffic distribution across multiple cluster nodes based on configurable weights. When enabled, the primary node receives all DNS traffic and distributes load proportionally across connected nodes. See [CLUSTERING.md](CLUSTERING.md#active-active-load-distribution) for complete setup guide.
+
+### LOAD_DISTRIBUTION_ENABLED
+**Type:** Boolean ("true" or "false")
+**Required:** No
+**Default:** "false"
+**Used in:** `lib/elixir_gateway/cluster/supervisor.ex`, `lib/elixir_gateway_web/plugs/load_distribution_router.ex`
+
+Enable active-active load distribution across cluster nodes. Requires clustering to be enabled.
+
+```bash
+# Enable on primary node (home server that receives DNS traffic)
+LOAD_DISTRIBUTION_ENABLED="true"
+
+# Disable on secondary nodes (they just accept forwarded requests)
+LOAD_DISTRIBUTION_ENABLED="false"
+```
+
+**Architecture:**
+- Primary node receives all DNS traffic
+- Primary distributes load based on weights via RPC
+- Secondary nodes accept and process forwarded requests
+- Session affinity is maintained across requests
+
+### NODE_WEIGHT
+**Type:** Integer
+**Required:** No
+**Default:** 70
+**Used in:** `lib/elixir_gateway/cluster/load_distributor.ex`
+
+Weight (capacity points) for this node. Each node in the cluster declares its own weight based on its hardware capacity. Traffic is distributed proportionally across all active nodes based on their declared weights.
+
+When nodes connect to the cluster, they automatically share their weights via RPC. The primary node (receiving DNS traffic) uses these weights to calculate traffic distribution.
+
+```bash
+# Home server (high capacity)
+NODE_WEIGHT="70"
+
+# Cloud server (medium capacity)
+NODE_WEIGHT="30"
+
+# Small cloud server (lower capacity)
+NODE_WEIGHT="15"
+```
+
+**Weight Distribution Examples:**
+- Single node: 70 points = 100% (all traffic local)
+- Home (70) + Cloud1 (30): Total 100 points → 70% / 30% distribution
+- Home (70) + Cloud1 (30) + Cloud2 (15): Total 115 points → 60.9% / 26.1% / 13% distribution
+
+**How It Works:**
+- Each node sets `NODE_WEIGHT` based on its actual capacity
+- On cluster connection, nodes exchange weights automatically via RPC
+- No centralized configuration needed
+- Add/remove nodes without updating other nodes' configs
+
+### MIN_REQ_THRESHOLD
+**Type:** Integer
+**Required:** No
+**Default:** 20
+**Used in:** `lib/elixir_gateway/cluster/load_distributor.ex`
+
+Minimum requests per minute before load distribution activates. Below this threshold, all traffic stays on the primary node to avoid RPC overhead during low traffic periods.
+
+```bash
+# Default threshold
+MIN_REQ_THRESHOLD="20"
+
+# Higher threshold for more local processing
+MIN_REQ_THRESHOLD="50"
+
+# Lower threshold for earlier distribution
+MIN_REQ_THRESHOLD="10"
+```
+
+**Behavior:**
+- **Below threshold**: All requests processed locally on primary
+- **Above threshold**: New sessions distributed based on weights
+- **Existing sessions**: Always routed to original node (affinity preserved)
+
+### Complete Load Distribution Example
+
+**Primary Server (Home) - Receives DNS traffic, distributes load:**
+```bash
+# Clustering
+CLUSTER_ENABLED="true"
+CLUSTER_SECRET="your-64-char-secret"
+NODE_NAME="gateway-home"
+CLUSTER_PEERS="cloud1.example.com:9100,cloud2.example.com:9100"
+DNS_FAILOVER_ENABLED="true"
+DDNS_DOMAINS="@:example.com:password"
+
+# Load Distribution
+LOAD_DISTRIBUTION_ENABLED="true"
+NODE_WEIGHT="70"
+MIN_REQ_THRESHOLD="20"
+```
+
+**Secondary Server (Cloud1) - Shares load:**
+```bash
+# Clustering
+CLUSTER_ENABLED="true"
+CLUSTER_SECRET="your-64-char-secret"
+NODE_NAME="gateway-cloud1"
+CLUSTER_PEERS=""  # Empty - accepts connections only
+IS_PRIMARY="false"
+
+# Load Distribution - enabled with medium capacity weight
+LOAD_DISTRIBUTION_ENABLED="true"
+NODE_WEIGHT="30"
+MIN_REQ_THRESHOLD="20"
+```
+
+**Secondary Server (Cloud2) - Shares load:**
+```bash
+# Clustering
+CLUSTER_ENABLED="true"
+CLUSTER_SECRET="your-64-char-secret"
+NODE_NAME="gateway-cloud2"
+CLUSTER_PEERS=""  # Empty - accepts connections only
+IS_PRIMARY="false"
+
+# Load Distribution - enabled with lower capacity weight
+LOAD_DISTRIBUTION_ENABLED="true"
+NODE_WEIGHT="15"
+MIN_REQ_THRESHOLD="20"
+```
+
+### Monitoring Load Distribution
+
+After enabling load distribution, monitor these Prometheus metrics:
+
+```bash
+# Request distribution per node
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://yourdomain.com/metrics | grep load_distribution_request_total
+
+# Active node weights
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://yourdomain.com/metrics | grep load_distribution_node_weight
+
+# Total active weight
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://yourdomain.com/metrics | grep load_distribution_total_weight
+
+# RPC forwarding latency
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://yourdomain.com/metrics | grep rpc_forward_duration
+```
+
+**Available Metrics:**
+- `elixirgateway_load_distribution_request_total{target_node}` - Requests per node
+- `elixirgateway_load_distribution_node_weight{node_name}` - Weight per node
+- `elixirgateway_load_distribution_total_weight` - Sum of active weights
+- `elixirgateway_load_distribution_enabled` - Feature status (1=on, 0=off)
+- `elixirgateway_load_distribution_below_threshold` - Traffic threshold status
+- `elixirgateway_rpc_forward_duration_milliseconds{destination_node,status}` - RPC latency
+
 ## Metrics Configuration
 
 ### METRICS_AUTH_TOKEN
@@ -527,6 +684,9 @@ export HTTPS_PORT=8443
 6. **Use asymmetric clustering** for cloud + home setups (cloud accepts, home initiates)
 7. **Set NODE_IP explicitly** on cloud servers with static IPs
 8. **Keep firewall ports open** for cluster communication (default: 9100)
+9. **Assign weights proportionally** to actual hardware capacity when using load distribution
+10. **Monitor load distribution metrics** to verify traffic is distributed as expected
+11. **Adjust MIN_REQ_THRESHOLD** based on your traffic patterns to optimize RPC overhead
 
 ## See Also
 

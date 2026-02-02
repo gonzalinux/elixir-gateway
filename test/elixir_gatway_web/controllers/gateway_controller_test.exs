@@ -145,7 +145,7 @@ defmodule ElixirGatewayWeb.GatewayControllerTest do
 
   describe "integration scenarios" do
     test "simulates plug pipeline failure scenario", %{conn: conn} do
-      # This test simulates what would happen if the domain router, 
+      # This test simulates what would happen if the domain router,
       # rate limiter, or request forwarder plugs all failed to handle the request
 
       conn =

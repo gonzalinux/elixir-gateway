@@ -98,6 +98,8 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   use GenServer
   require Logger
 
+  alias ElixirGateway.Cluster.Config
+
   @session_table :elixirgateway_sticky_sessions
   @default_session_ttl_minutes 30
   @default_cleanup_interval_minutes 5
@@ -117,10 +119,11 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   Returns:
   - `:local` - This backend node should handle it
   - `{:remote, node}` - Forward to the specified backend node
+  - `:new_session` - No existing session, load distributor should decide
   - `:not_clustered` - Clustering is disabled, handle locally
   """
   def get_node(conn) do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       key = extract_connection_key(conn)
 
       case lookup_session(key) do
@@ -135,12 +138,48 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
           end
 
         :not_found ->
-          # First time seeing this connection, claim it for this backend node
-          register_session(key, node())
-          :local
+          # First time seeing this connection - let load distributor decide
+          # Changed from auto-registering to support weighted load distribution
+          if Config.load_distribution_enabled?() do
+            :new_session
+          else
+            # Legacy behavior: auto-register on local node
+            register_session_internal(key, node())
+            :local
+          end
       end
     else
       :not_clustered
+    end
+  end
+
+  @doc """
+  Registers a session affinity to a specific node.
+
+  This is the public API used by LoadDistributionRouter to register new sessions
+  to the selected node (local or remote).
+  """
+  def register_session(conn, target_node) when is_map(conn) do
+    if Config.clustering_enabled?() do
+      key = extract_connection_key(conn)
+      register_session_internal(key, target_node)
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Registers a session affinity to a remote node.
+
+  This is used by LoadDistributionRouter when a new session is assigned
+  to a remote node via weighted distribution.
+  """
+  def register_session_on_remote(conn, remote_node) do
+    if Config.clustering_enabled?() do
+      key = extract_connection_key(conn)
+      register_session_internal(key, remote_node)
+    else
+      :ok
     end
   end
 
@@ -151,17 +190,17 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   Kept for backward compatibility and explicit registration.
   """
   def register_connection(conn) when is_map(conn) do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       key = extract_connection_key(conn)
-      register_session(key, node())
+      register_session_internal(key, node())
     else
       :ok
     end
   end
 
   def register_connection(key) when is_tuple(key) do
-    if clustering_enabled?() do
-      register_session(key, node())
+    if Config.clustering_enabled?() do
+      register_session_internal(key, node())
     else
       :ok
     end
@@ -174,7 +213,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   Useful for explicit session termination (e.g., user logout, connection close).
   """
   def unregister_connection(conn) when is_map(conn) do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       key = extract_connection_key(conn)
       unregister_session(key)
     else
@@ -183,7 +222,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   end
 
   def unregister_connection(key) when is_tuple(key) do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       unregister_session(key)
     else
       :ok
@@ -195,7 +234,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   Useful for monitoring and metrics.
   """
   def session_count do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       case :ets.info(@session_table, :size) do
         :undefined -> 0
         size when is_integer(size) -> size
@@ -209,7 +248,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
 
   @impl true
   def init(_opts) do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       # Create ETS table for session storage
       # Table structure: {session_key, backend_node, last_access_ms}
       :ets.new(@session_table, [
@@ -239,7 +278,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
 
   @impl true
   def handle_info(:cleanup_sessions, state) do
-    if clustering_enabled?() do
+    if Config.clustering_enabled?() do
       cleanup_stale_sessions()
     end
 
@@ -257,11 +296,6 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   end
 
   ## Private Functions
-
-  defp clustering_enabled? do
-    config = Application.get_env(:elixirgateway, :cluster, [])
-    Keyword.get(config, :enabled, false)
-  end
 
   defp get_config do
     cluster_config = Application.get_env(:elixirgateway, :cluster, [])
@@ -294,7 +328,7 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
       :not_found
   end
 
-  defp register_session(key, backend_node) do
+  defp register_session_internal(key, backend_node) do
     now_ms = System.system_time(:millisecond)
 
     try do

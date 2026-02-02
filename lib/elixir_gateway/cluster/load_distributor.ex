@@ -1,0 +1,359 @@
+defmodule ElixirGateway.Cluster.LoadDistributor do
+  @moduledoc """
+  Manages weight-based load distribution across cluster nodes.
+
+  This module implements active-active load distribution where the primary node
+  (home server) receives all DNS traffic and intelligently distributes load across
+  all connected nodes based on their configured weights, while maintaining session
+  affinity.
+
+  ## Weight-Based Distribution
+
+  Each node is assigned a capacity weight (points). Load is distributed proportionally:
+
+  - Primary (home) alone: 70 points = 100% distribution
+  - Primary + secondary1: 70 + 30 = 100 points → 70%/30% distribution
+  - Primary + secondary1 + secondary2: 70 + 30 + 15 = 115 points → 60.9%/26.1%/13.0% distribution
+
+  ## Threshold Behavior
+
+  When traffic is below the minimum threshold (default: 20 requests/minute), all
+  requests are processed locally on the primary node to avoid RPC overhead. Once
+  traffic exceeds the threshold, weighted distribution activates.
+
+  ## Dynamic Adjustment
+
+  When nodes connect or disconnect, weights automatically recalculate and load
+  redistributes across the available nodes.
+  """
+
+  use GenServer
+  require Logger
+
+  alias ElixirGateway.Cluster.Config
+
+  @typedoc "Node weights shared when connected"
+  @type node_weights :: %{
+          weight: integer(),
+          node: node()
+        }
+
+  @table_name :elixirgateway_load_distributor
+  @request_window_seconds 60
+  @cleanup_interval_ms 10_000
+
+  # Client API
+
+  @doc """
+  Starts the LoadDistributor GenServer.
+  """
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @doc """
+  Selects which node should handle a new session based on current load and weights.
+
+  Returns the node atom. If traffic is below threshold, returns the current node.
+  Otherwise, performs weighted random selection across all active nodes.
+  """
+  def select_node_for_new_session do
+    if enabled?() do
+      if below_traffic_threshold?() do
+        Logger.debug("Traffic below threshold, routing to local node")
+        node()
+      else
+        node = weighted_random_node()
+        Logger.debug("Selected node via weighted distribution: #{node}")
+        node
+      end
+    else
+      node()
+    end
+  end
+
+  @doc """
+  Performs weighted random selection across active nodes.
+
+  Example: Primary=70, secondary1=30 (total=100)
+  - Random value 0-69 → Primary
+  - Random value 70-99 → secondary1
+  """
+  def weighted_random_node do
+    {total_weight, weights} = get_active_node_weights()
+
+    cond do
+      map_size(weights) == 0 ->
+        # No weights configured or no nodes active
+        node()
+
+      total_weight == 0 ->
+        node()
+
+      true ->
+        random_value = :rand.uniform(total_weight)
+        select_by_cumulative_weight(weights, random_value)
+    end
+  end
+
+  @doc """
+  Returns a map of currently active (connected) nodes to their weights.
+
+  Only includes nodes that are currently connected to the cluster.
+  Always includes the current node (primary).
+  """
+  def get_active_node_weights do
+    GenServer.call(__MODULE__, :get_weights)
+  end
+
+  @doc """
+  Records a request for the given node for threshold tracking.
+
+  Uses a sliding window approach with 1-second buckets for accurate
+  request counting over the last 60 seconds.
+  """
+  def record_request(target_node) do
+    if enabled?() do
+      GenServer.cast(__MODULE__, {:record_request, target_node, System.monotonic_time(:second)})
+    end
+  end
+
+  @doc """
+  Returns true if total requests in the last 60 seconds is below the minimum threshold.
+
+  Default threshold is 20 requests/minute.
+  """
+  def below_traffic_threshold? do
+    if enabled?() do
+      config = load_distribution_config()
+      min_threshold = config[:min_requests_threshold] || 20
+      window_seconds = config[:window_seconds] || @request_window_seconds
+
+      current_time = System.monotonic_time(:second)
+      cutoff_time = current_time - window_seconds
+
+      # Count requests in the window
+      total_requests =
+        :ets.foldl(
+          fn
+            {{:request, _node, timestamp}, count}, acc when timestamp >= cutoff_time ->
+              acc + count
+
+            _, acc ->
+              acc
+          end,
+          0,
+          @table_name
+        )
+
+      total_requests < min_threshold
+    else
+      true
+    end
+  end
+
+  @doc """
+  Returns true if load distribution is enabled in configuration.
+
+  Delegates to `ElixirGateway.Cluster.Config.load_distribution_enabled?/0`
+  """
+  defdelegate enabled?, to: Config, as: :load_distribution_enabled?
+
+  @doc """
+  Returns the total weight of all currently active nodes.
+  Used for metrics.
+  """
+  def get_total_active_weight do
+    {total_weight, _} = get_active_node_weights()
+    total_weight
+  end
+
+  @doc """
+  Returns node weights formatted for PromEx metrics.
+  Returns a list of tuples: [{node_name, weight}, ...]
+  """
+  def get_node_weights_for_metrics do
+    {_total, nodes} = get_active_node_weights()
+
+    nodes
+    |> Enum.map(fn {_node_key, %{node: node_name, weight: weight}} ->
+      {[node_name: to_string(node_name)], weight}
+    end)
+  end
+
+  # Server Callbacks
+
+  @impl true
+  def init(_opts) do
+    if enabled?() do
+      # Create ETS table for request tracking
+      :ets.new(@table_name, [:named_table, :set, :public, read_concurrency: true])
+      :net_kernel.monitor_nodes(true, node_type: :all)
+      # Schedule cleanup of old request data
+      schedule_cleanup()
+
+      Logger.info(
+        "LoadDistributor started with configuration: #{inspect(load_distribution_config())}"
+      )
+
+      config = load_distribution_config()
+      weight = config[:node_weight] || 100
+
+      {:ok,
+       %{
+         node_weight: weight,
+         total_weight: weight,
+         nodes: %{node() => %{node: node(), weight: weight}}
+       }}
+    else
+      Logger.info("LoadDistributor disabled")
+      {:ok, %{}, :hibernate}
+    end
+  end
+
+  @impl true
+  def handle_cast({:record_request, target_node, timestamp}, state) do
+    key = {:request, target_node, timestamp}
+
+    case :ets.lookup(@table_name, key) do
+      [{^key, count}] ->
+        :ets.insert(@table_name, {key, count + 1})
+
+      [] ->
+        :ets.insert(@table_name, {key, 1})
+    end
+
+    # Emit telemetry event
+    :telemetry.execute(
+      [:elixirgateway, :load_distribution, :request],
+      %{count: 1},
+      %{target_node: target_node}
+    )
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:cleanup, state) do
+    cleanup_old_requests()
+    schedule_cleanup()
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodeup, peer_node, _info}, state) do
+    # Broadcast weight to peer asynchronously to avoid blocking GenServer
+    node_weight = state.node_weight
+
+    Task.start(fn ->
+      case :rpc.call(
+             peer_node,
+             __MODULE__,
+             :remote_node_weight,
+             [%{node: node(), weight: node_weight}],
+             30_000
+           ) do
+        :ok ->
+          Logger.debug("Successfully shared weight with peer #{peer_node}")
+
+        {:badrpc, reason} ->
+          Logger.warning("Failed to share weight with peer #{peer_node}: #{inspect(reason)}")
+
+        other ->
+          Logger.warning("Unexpected response from peer #{peer_node}: #{inspect(other)}")
+      end
+    end)
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodedown, peer_node, _info}, state) do
+    elem = Map.get(state.nodes, peer_node)
+
+    state =
+      if elem != nil do
+        total_weight = state.total_weight - elem.weight
+        nodes = Map.delete(state.nodes, peer_node)
+        %{state | total_weight: total_weight, nodes: nodes}
+      else
+        state
+      end
+
+    Logger.debug("Removed node from load distribution: #{peer_node}")
+
+    {:noreply, state}
+  end
+
+  @doc """
+  RPC endpoint called when a node joins the cluster to broadcast its weight.
+  """
+  @spec remote_node_weight(node_weights()) :: :ok | {:error, term()}
+  def remote_node_weight(new_weight) do
+    # TODO HARDCODED
+    GenServer.call(__MODULE__, {:remote_node_weight, new_weight}, 30_000)
+  end
+
+  @impl true
+  def handle_call(:get_weights, _from, state) do
+    {:reply, {state.total_weight, state.nodes}, state}
+  end
+
+  @impl true
+  def handle_call({:remote_node_weight, new_weight}, _from, state) do
+    elem = Map.get(state.nodes, new_weight.node)
+
+    state =
+      if elem != nil do
+        total_weight = state.total_weight - elem.weight
+        %{state | total_weight: total_weight}
+      else
+        state
+      end
+
+    Logger.debug("Added node from load distribution: #{new_weight.node} #{new_weight.weight}")
+
+    nodes = Map.put(state.nodes, new_weight.node, new_weight)
+    total_weight = state.total_weight + new_weight.weight
+    state = %{state | nodes: nodes, total_weight: total_weight}
+    {:reply, :ok, state}
+  end
+
+  # Private Functions
+
+  defp select_by_cumulative_weight(weights, random_value) do
+    weights
+    |> Enum.sort_by(fn {node_key, _node_info} -> node_key end)
+    |> Enum.reduce_while({0, node()}, fn {_node_key, %{node: node_name, weight: weight}},
+                                         {cumulative, _} ->
+      new_cumulative = cumulative + weight
+
+      if random_value <= new_cumulative do
+        {:halt, {new_cumulative, node_name}}
+      else
+        {:cont, {new_cumulative, node_name}}
+      end
+    end)
+    |> elem(1)
+  end
+
+  defp cleanup_old_requests do
+    config = load_distribution_config()
+    window_seconds = config[:window_seconds] || @request_window_seconds
+    current_time = System.monotonic_time(:second)
+    cutoff_time = current_time - window_seconds
+
+    # Delete all request records older than the window
+    :ets.select_delete(@table_name, [
+      {{{:request, :_, :"$1"}, :_}, [{:<, :"$1", cutoff_time}], [true]}
+    ])
+  end
+
+  defp schedule_cleanup do
+    Process.send_after(self(), :cleanup, @cleanup_interval_ms)
+  end
+
+  defp load_distribution_config do
+    Config.load_distribution_config()
+  end
+end

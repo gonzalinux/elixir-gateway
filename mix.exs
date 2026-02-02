@@ -51,7 +51,8 @@ defmodule ElixirGateway.MixProject do
       {:quantum, "~> 3.5"},
       {:tidewave, "~> 0.1", only: :dev},
       {:bypass, "~> 2.1", only: :test},
-      {:mock, "~> 0.3.0", only: :test}
+      {:mock, "~> 0.3.0", only: :test},
+      {:k6, "~> 0.2.1"}
     ]
   end
 
