@@ -72,6 +72,35 @@ if System.get_env("BOT_BLOCKER_ENABLED") do
     max_404s_before_block: 10
 end
 
+# Gateway services configuration (all environments)
+# Format: "host=>target;host=>target"
+# Example: "api.example.com=>http://localhost:8080;app.example.com=>https://192.168.1.10:3000"
+if services_str = System.get_env("GATEWAY_SERVICES") do
+  services =
+    services_str
+    |> String.split(";", trim: true)
+    |> Enum.map(fn mapping ->
+      case String.split(mapping, "=>", parts: 2) do
+        [host, target] ->
+          {String.trim(host), String.trim(target)}
+
+        _ ->
+          raise """
+          Invalid GATEWAY_SERVICES format: #{mapping}
+          Expected format: host=>target
+          Example: api.example.com=>http://localhost:8080
+          """
+      end
+    end)
+    |> Map.new()
+
+  # Get existing gateway config and merge services
+  gateway_config = Application.get_env(:elixirgateway, :gateway, [])
+
+  config :elixirgateway, :gateway,
+    Keyword.put(gateway_config, :services, services)
+end
+
 # Native Erlang distribution clustering configuration (all environments)
 if System.get_env("CLUSTER_ENABLED") == "true" do
   secret =

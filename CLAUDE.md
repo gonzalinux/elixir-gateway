@@ -132,18 +132,42 @@ export MIN_REQ_THRESHOLD=20
 
 ### Configuration Structure
 
-Gateway services are configured in config files:
+Gateway services can be configured in config files or via environment variables:
+
+**Config file approach:**
 ```elixir
 config :elixirgateway, :gateway,
   services: %{
     "api.yourdomain.com" => "http://192.168.1.10:8080",
-    "app.yourdomain.com" => "https://192.168.1.11:4000"
+    "app.yourdomain.com" => "https://192.168.1.11:4000",
+    "default_any" => "http://localhost:8000"
   },
   rate_limit: [
-    requests_per_minute: 100,
+    user_requests_per_minute: 100,
+    ip_requests_per_minute: 500,
     cleanup_interval: :timer.minutes(1)
   ]
 ```
+
+**Environment variable approach (recommended for production/containers):**
+```bash
+# Gateway service mappings
+GATEWAY_SERVICES="api.example.com=>http://localhost:8080;app.example.com=>https://192.168.1.10:3000;default_any=>http://localhost:8000"
+
+# Rate limiting
+RATE_LIMIT_USER=1000
+RATE_LIMIT_IP=5000
+
+# Bot blocking
+BOT_BLOCKER_ENABLED=true
+BOT_BLOCK_DURATION=3600
+```
+
+**Format for GATEWAY_SERVICES:**
+- Semicolon-separated mappings: `host=>target;host=>target`
+- Use `default` or `default_any` as catch-all for unmatched hosts
+- Whitespace around `=>` and `;` is automatically trimmed
+- Overrides all config file services when set
 
 ### Key Dependencies
 - **Phoenix 1.7.21** - Web framework

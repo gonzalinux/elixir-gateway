@@ -692,6 +692,43 @@ BOT_BLOCK_DURATION="300"
 - Longer durations reduce load from persistent attackers
 - Consider your server's memory if setting very long durations with many attackers
 
+### GATEWAY_SERVICES
+**Type:** String (semicolon-separated mappings)
+**Required:** No
+**Default:** Uses services from config files
+**Used in:** `lib/elixir_gateway_web/plugs/domain_router.ex`
+
+Configure domain-to-backend routing mappings. When set, this **overrides** all services configured in `config/*.exs` files.
+
+**Format:** `host=>target_url;host=>target_url;...`
+
+```bash
+# Simple example
+GATEWAY_SERVICES="api.example.com=>http://localhost:8080"
+
+# Multiple services
+GATEWAY_SERVICES="api.example.com=>http://localhost:8080;app.example.com=>https://192.168.1.10:3000;seveneat.com=>http://localhost:8443"
+
+# With default fallback
+GATEWAY_SERVICES="api.example.com=>http://localhost:8080;default=>http://localhost:8000"
+
+# With default_any (catches all unmatched domains)
+GATEWAY_SERVICES="api.example.com=>http://localhost:8080;default_any=>http://localhost:8000"
+```
+
+**Notes:**
+- Use `default` as a special hostname to handle requests to the gateway's own hostname
+- Use `default_any` as a catch-all for any unmatched domain/host
+- Target URLs must include protocol (`http://` or `https://`)
+- Whitespace around `=>` and `;` is automatically trimmed
+- Changes require application restart to take effect
+- Useful for containerized deployments where config files are immutable
+
+**Example Production Setup:**
+```bash
+GATEWAY_SERVICES="api.myapp.com=>http://api-backend:8080;app.myapp.com=>http://webapp:3000;admin.myapp.com=>http://admin:4000;default_any=>http://landing-page:80"
+```
+
 ## Development & Debugging
 
 Logging configuration is managed through `config/config.exs` and is currently hardcoded. Performance settings like HTTP client pool sizes are also configured in the application code rather than through environment variables.
