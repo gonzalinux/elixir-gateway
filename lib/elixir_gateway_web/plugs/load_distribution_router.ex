@@ -21,14 +21,14 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
   import Plug.Conn
   require Logger
 
-  alias ElixirGateway.Cluster.{ConnectionRegistry, LoadDistributor}
+  alias ElixirGateway.Cluster.{Config, ConnectionRegistry, LoadDistributor}
 
   @doc false
   def init(opts), do: opts
 
   @doc false
   def call(conn, _opts) do
-    if load_distribution_enabled?() do
+    if Config.load_distribution_enabled?() do
       route_with_load_distribution(conn)
     else
       # Load distribution disabled, always process locally
@@ -74,11 +74,5 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
       ConnectionRegistry.register_session_on_remote(conn, selected_node)
       assign(conn, :target_node, {:remote, selected_node})
     end
-  end
-
-  defp load_distribution_enabled? do
-    cluster_config = Application.get_env(:elixirgateway, :cluster, [])
-    load_dist_config = cluster_config[:load_distribution] || []
-    load_dist_config[:enabled] == true
   end
 end

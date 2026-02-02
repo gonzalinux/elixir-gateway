@@ -6,6 +6,8 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   import Plug.Conn
   require Logger
 
+  alias ElixirGateway.Cluster.Config
+
   def init(opts), do: opts
 
   def call(conn, opts) do
@@ -40,7 +42,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
   defp process_locally(conn, _opts) do
     # Record request for load distribution tracking
-    if load_distribution_enabled?() do
+    if Config.load_distribution_enabled?() do
       ElixirGateway.Cluster.LoadDistributor.record_request(node())
     end
 
@@ -71,7 +73,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     case :rpc.call(node, __MODULE__, :execute_forwarded_request, [request_data], 45_000) do
       {:ok, status, headers, body} ->
         # Record successful forwarded request
-        if load_distribution_enabled?() do
+        if Config.load_distribution_enabled?() do
           ElixirGateway.Cluster.LoadDistributor.record_request(node)
         end
 
@@ -104,7 +106,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         Logger.warning("Remote node down (#{node}), processing locally as fallback")
 
         # Record local request since we're falling back
-        if load_distribution_enabled?() do
+        if Config.load_distribution_enabled?() do
           ElixirGateway.Cluster.LoadDistributor.record_request(node())
         end
 
@@ -424,9 +426,4 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     )
   end
 
-  defp load_distribution_enabled? do
-    cluster_config = Application.get_env(:elixirgateway, :cluster, [])
-    load_dist_config = cluster_config[:load_distribution] || []
-    load_dist_config[:enabled] == true
-  end
 end

@@ -30,6 +30,8 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   use GenServer
   require Logger
 
+  alias ElixirGateway.Cluster.Config
+
   @typedoc "Node weights shared when connected"
   @type node_weights :: %{
           weight: integer(),
@@ -80,16 +82,17 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   def weighted_random_node do
     {total_weight, weights} = get_active_node_weights()
 
-    if map_size(weights) == 0 do
-      # No weights configured or no nodes active
-      node()
-    else
-      if total_weight == 0 do
+    cond do
+      map_size(weights) == 0 ->
+        # No weights configured or no nodes active
         node()
-      else
+
+      total_weight == 0 ->
+        node()
+
+      true ->
         random_value = :rand.uniform(total_weight)
         select_by_cumulative_weight(weights, random_value)
-      end
     end
   end
 
@@ -151,11 +154,10 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
 
   @doc """
   Returns true if load distribution is enabled in configuration.
+
+  Delegates to `ElixirGateway.Cluster.Config.load_distribution_enabled?/0`
   """
-  def enabled? do
-    config = load_distribution_config()
-    config[:enabled] == true
-  end
+  defdelegate enabled?, to: Config, as: :load_distribution_enabled?
 
   @doc """
   Returns the total weight of all currently active nodes.
@@ -287,9 +289,9 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   RPC endpoint called when a node joins the cluster to broadcast its weight.
   """
   @spec remote_node_weight(node_weights()) :: :ok | {:error, term()}
-  def remote_node_weight(new_weights) do
+  def remote_node_weight(new_weight) do
     # TODO HARDCODED
-    GenServer.call(__MODULE__, {:remote_node_weight, new_weights}, 30_000)
+    GenServer.call(__MODULE__, {:remote_node_weight, new_weight}, 30_000)
   end
 
   @impl true
@@ -298,7 +300,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   end
 
   @impl true
-  def handle_call(:remote_node_weight, new_weight, state) do
+  def handle_call({:remote_node_weight, new_weight}, _from, state) do
     elem = Map.get(state.nodes, new_weight.node)
 
     state =
@@ -352,7 +354,6 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   end
 
   defp load_distribution_config do
-    cluster_config = Application.get_env(:elixirgateway, :cluster, [])
-    cluster_config[:load_distribution] || [enabled: false]
+    Config.load_distribution_config()
   end
 end
