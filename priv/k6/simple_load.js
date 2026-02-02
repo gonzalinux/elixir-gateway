@@ -1,9 +1,20 @@
 import http from "k6/http";
-import { check, sleep } from "k6";
+import { check } from "k6";
 
 export const options = {
-  vus: 10,
-  duration: '60s',
+  scenarios: {
+    ramping_load: {
+      executor: 'ramping-arrival-rate',
+      startRate: 1,        // Start at 1 request per second
+      timeUnit: '1s',
+      preAllocatedVUs: 100, // Pre-allocate some VUs
+      maxVUs: 1000,        // Allow up to 1000 VUs if needed
+      stages: [
+        { duration: '30s', target: 2000 }, // Ramp from 1 to 2000 req/s over 30 seconds
+        { duration: '30s', target: 2000 }, // Hold at 2000 req/s for 30 seconds
+      ],
+    },
+  },
   thresholds: {
     http_req_failed: ['rate<0.01'],
     http_req_duration: ['p(95)<500'],
@@ -44,6 +55,4 @@ export default function () {
     'status is 200': (r) => r.status === 200,
     'response time ok': (r) => r.timings.duration < 1000,
   });
-
-  sleep(0.1);
 }

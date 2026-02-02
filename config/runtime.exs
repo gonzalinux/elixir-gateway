@@ -58,7 +58,7 @@ if System.get_env("RATE_LIMIT_USER") || System.get_env("RATE_LIMIT_IP") do
   ]
 
   config :elixirgateway, :gateway,
-    Keyword.merge(gateway_config, rate_limit: rate_limit_config)
+    Keyword.put(gateway_config, :rate_limit, rate_limit_config)
 end
 
 # Bot blocker configuration (all environments)
