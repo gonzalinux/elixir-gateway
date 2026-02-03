@@ -39,7 +39,7 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
     ~r/shell/i,
     ~r/eval-stdin\.php/i,
     ~r/backdoor/i,
-    ~r/webshell/i,
+    ~r/webshell/i
   ]
 
   @table_name :bot_blocker_ips
@@ -85,6 +85,7 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
     case :ets.lookup(@table_name, ip) do
       [{^ip, block_until}] ->
         now = System.system_time(:second)
+
         if now < block_until do
           true
         else
@@ -146,6 +147,7 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
       :ets.new(@table_name, [:set, :public, :named_table, read_concurrency: true])
     end
   rescue
-    ArgumentError -> :ok  # Table already exists
+    # Table already exists
+    ArgumentError -> :ok
   end
 end

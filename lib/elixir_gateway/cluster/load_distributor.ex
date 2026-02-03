@@ -62,14 +62,22 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
       {total_weight, weights} = get_active_node_weights()
 
       if below_traffic_threshold?() do
-        Logger.info("Load distributor: Traffic below threshold, routing to local node (active nodes: #{map_size(weights)}, total weight: #{total_weight})")
+        Logger.info(
+          "Load distributor: Traffic below threshold, routing to local node (active nodes: #{map_size(weights)}, total weight: #{total_weight})"
+        )
+
         node()
       else
         selected_node = weighted_random_node()
         node_weight = get_in(weights, [selected_node, :weight]) || 0
-        percentage = if total_weight > 0, do: Float.round(node_weight / total_weight * 100, 1), else: 0
 
-        Logger.info("Load distributor: Selected #{selected_node} for new session (weight: #{node_weight}/#{total_weight} = #{percentage}%)")
+        percentage =
+          if total_weight > 0, do: Float.round(node_weight / total_weight * 100, 1), else: 0
+
+        Logger.info(
+          "Load distributor: Selected #{selected_node} for new session (weight: #{node_weight}/#{total_weight} = #{percentage}%)"
+        )
+
         selected_node
       end
     else
@@ -283,7 +291,9 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
         new_total = state.total_weight - elem.weight
         nodes = Map.delete(state.nodes, peer_node)
 
-        Logger.info("Load distributor: Node disconnected #{peer_node} (weight: #{elem.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}")
+        Logger.info(
+          "Load distributor: Node disconnected #{peer_node} (weight: #{elem.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
+        )
 
         %{state | total_weight: new_total, nodes: nodes}
       else
@@ -325,7 +335,9 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
     new_total = state.total_weight + new_weight.weight
     state = %{state | nodes: nodes, total_weight: new_total}
 
-    Logger.info("Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}")
+    Logger.info(
+      "Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
+    )
 
     {:reply, :ok, state}
   end

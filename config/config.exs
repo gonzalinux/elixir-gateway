@@ -29,7 +29,8 @@ config :elixirgateway, :gateway,
 # Bot blocker configuration
 config :elixirgateway, :bot_blocker,
   enabled: true,
-  block_duration_seconds: 3600,  # 1 hour
+  # 1 hour
+  block_duration_seconds: 3600,
   max_404s_before_block: 10
 
 # Configures the endpoint

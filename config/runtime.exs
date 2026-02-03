@@ -89,8 +89,7 @@ if services_str = System.get_env("GATEWAY_SERVICES") do
     end)
     |> Map.new()
 
-  config :elixirgateway, :gateway,
-    services: services
+  config :elixirgateway, :gateway, services: services
 end
 
 # Native Erlang distribution clustering configuration (all environments)

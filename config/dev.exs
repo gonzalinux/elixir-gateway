@@ -34,12 +34,14 @@ config :elixirgateway, :gateway,
     "default" => "http://localhost:8443",
     "localhost" => "http://localhost:8443"
   }
-  # rate_limit is configured in runtime.exs via env vars
+
+# rate_limit is configured in runtime.exs via env vars
 
 # Bot blocker configuration
 config :elixirgateway, :bot_blocker,
   enabled: true,
-  block_duration_seconds: 3600,  # 1 hour
+  # 1 hour
+  block_duration_seconds: 3600,
   max_404s_before_block: 10
 
 # SiteEncrypt configuration for development
