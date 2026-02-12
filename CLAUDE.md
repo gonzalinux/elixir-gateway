@@ -27,7 +27,7 @@ ElixirGateway is a high-performance API Gateway built with Phoenix that serves a
 
 ### Request Processing Pipeline
 ```
-Internet → Rate Limiter → WebSocket Upgrade Check → Domain Router → Load Distribution Router → Request Forwarder
+Internet → Bot Blocker → Rate Limiter → WebSocket Upgrade Check → Domain Router → Load Distribution Router → Request Forwarder
 ```
 
 **Note**: LoadDistributionRouter is only active when load distribution is enabled. When disabled, requests flow directly from DomainRouter to RequestForwarder.
