@@ -318,17 +318,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
       # For multipart data, check if it was parsed
       String.starts_with?(content_type, "multipart/") and conn.params != %{} ->
-        case read_raw_body(conn) do
-          {body, _conn} -> body
-          _ -> ""
-        end
-
+         read_raw_body(conn)
       # For all other content types (including binary), use raw body
       true ->
-        case read_raw_body(conn) do
-          {body, _conn} -> body
-          _ -> ""
-        end
+        read_raw_body(conn)
     end
   end
 
