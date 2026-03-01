@@ -208,6 +208,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
       config = load_distribution_config()
       weight = config[:node_weight] || 100
       min_threshold = config[:min_requests_threshold] || 20
+      services = get_local_service_keys()
 
       Logger.info(
         "Load distributor: ENABLED - This node weight: #{weight}, min threshold: #{min_threshold} req/min, initial total weight: #{weight}"
@@ -217,7 +218,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
        %{
          node_weight: weight,
          total_weight: weight,
-         nodes: %{node() => %{node: node(), weight: weight}}
+         nodes: %{node() => %{node: node(), weight: weight, services: services}}
        }}
     else
       Logger.info("LoadDistributor disabled")
@@ -256,15 +257,16 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
 
   @impl true
   def handle_info({:nodeup, peer_node, _info}, state) do
-    # Broadcast weight to peer asynchronously to avoid blocking GenServer
+    # Broadcast weight and service keys to peer asynchronously to avoid blocking GenServer
     node_weight = state.node_weight
+    services = get_local_service_keys()
 
     Task.start(fn ->
       case :rpc.call(
              peer_node,
              __MODULE__,
              :remote_node_weight,
-             [%{node: node(), weight: node_weight}],
+             [%{node: node(), weight: node_weight, services: services}],
              30_000
            ) do
         :ok ->
@@ -331,15 +333,40 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
         state
       end
 
-    nodes = Map.put(state.nodes, new_weight.node, new_weight)
+    # Preserve services if the peer didn't send them (older node version)
+    services = Map.get(new_weight, :services, [])
+    node_info = %{node: new_weight.node, weight: new_weight.weight, services: services}
+
+    nodes = Map.put(state.nodes, new_weight.node, node_info)
     new_total = state.total_weight + new_weight.weight
     state = %{state | nodes: nodes, total_weight: new_total}
 
     Logger.info(
-      "Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
+      "Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}, services: #{length(services)}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
     )
 
     {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call({:node_has_service, node_name, host}, _from, state) do
+    result =
+      case Map.get(state.nodes, node_name) do
+        %{services: services} -> Enum.any?(services, &service_key_matches?(&1, host))
+        nil -> false
+      end
+
+    {:reply, result, state}
+  end
+
+  @doc """
+  Returns true if the given node has a service configured for the host.
+
+  Uses cached service keys exchanged at node-join time — no RPC call needed.
+  Supports exact match, wildcard patterns (`*.example.com`), and `default_any`.
+  """
+  def node_has_service?(node_name, host) do
+    GenServer.call(__MODULE__, {:node_has_service, node_name, host})
   end
 
   # Private Functions
@@ -378,5 +405,30 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
 
   defp load_distribution_config do
     Config.load_distribution_config()
+  end
+
+  defp get_local_service_keys do
+    Application.get_env(:elixirgateway, :gateway)[:services]
+    |> case do
+      nil -> []
+      services -> Map.keys(services)
+    end
+  end
+
+  defp service_key_matches?(key, host) do
+    cond do
+      key == host ->
+        true
+
+      key in ["default_any", "default"] ->
+        true
+
+      String.starts_with?(key, "*") ->
+        suffix = String.slice(key, 1..-1//1)
+        String.ends_with?(host, suffix) or host == suffix
+
+      true ->
+        false
+    end
   end
 end

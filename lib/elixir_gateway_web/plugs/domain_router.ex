@@ -10,23 +10,35 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
 
   def call(conn, _opts) do
     host = get_host(conn)
-    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
 
-    with nil <- Map.get(services, host),
-         nil <- find_wildcard_match(services, host),
-         nil <- if(host != "default", do: Map.get(services, "default_any")) do
-      Logger.warning("No service configured for host: #{host}")
+    case resolve_service(host) do
+      nil ->
+        Logger.warning("No service configured for host: #{host}")
 
-      conn
-      |> put_resp_content_type("application/json")
-      |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
-      |> halt()
-    else
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
+        |> halt()
+
       target_url ->
         conn
         |> assign(:target_url, target_url)
         |> assign(:original_host, host)
     end
+  end
+
+  @doc """
+  Resolves a host to its target service URL using local configuration.
+
+  Returns the target URL string, or nil if no service is configured for the host.
+  Checks exact match, wildcard patterns, and the default_any fallback in order.
+  """
+  def resolve_service(host) do
+    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
+
+    Map.get(services, host) ||
+      find_wildcard_match(services, host) ||
+      if(host != "default", do: Map.get(services, "default_any"))
   end
 
   defp find_wildcard_match(services, host) do
