@@ -993,7 +993,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (user_type) (elixirgateway_rate_limit_violations{deploy=~\"$deploy\"})",
+          "expr": "sum by (user_type) (rate(elixirgateway_rate_limit_violations_total{deploy=~\"$deploy\"}[1m])) * 60",
           "legendFormat": "{{user_type}}",
           "refId": "A"
         }
@@ -1056,25 +1056,6 @@
                 "value": 2
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Active Connections"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#8F3BB8",
-                  "mode": "fixed"
-                }
-              },
-              {
-                "id": "custom.lineWidth",
-                "value": 2
-              }
-            ]
           }
         ]
       },
@@ -1115,15 +1096,6 @@
           "expr": "sum(elixirgateway_session_registry_active_sessions{deploy=~\"$deploy\"})",
           "legendFormat": "Active Sessions",
           "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "sum(elixirgateway_connections_total{deploy=~\"$deploy\"})",
-          "legendFormat": "Active Connections",
-          "refId": "C"
         }
       ],
       "title": "Cluster & Sessions",

@@ -10,12 +10,6 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
     poll_rate = Keyword.get(opts, :poll_rate, 5_000)
 
     [
-      # Active connections metric
-      gateway_connections_total(poll_rate),
-
-      # Rate limiting metrics
-      rate_limit_metrics(poll_rate),
-
       # Cluster health metrics
       cluster_health_metrics(poll_rate),
 
@@ -39,6 +33,9 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       # Response time metrics
       gateway_response_time_metrics(),
 
+      # Rate limit violation events
+      rate_limit_event_metrics(),
+
       # Load distribution event metrics
       load_distribution_event_metrics(),
 
@@ -47,33 +44,14 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
     ]
   end
 
-  defp gateway_connections_total(poll_rate) do
-    Polling.build(
-      :gateway_connections_total,
-      poll_rate,
-      {__MODULE__, :execute_connections_total, []},
+  defp rate_limit_event_metrics do
+    Event.build(
+      :rate_limit_event_metrics,
       [
-        last_value(
-          [:elixirgateway, :connections, :total],
-          event_name: [:elixirgateway, :connections, :total],
-          description: "Total number of active connections",
-          measurement: :count
-        )
-      ]
-    )
-  end
-
-  defp rate_limit_metrics(poll_rate) do
-    Polling.build(
-      :gateway_rate_limits,
-      poll_rate,
-      {__MODULE__, :execute_rate_limits, []},
-      [
-        last_value(
+        counter(
           [:elixirgateway, :rate_limit, :violations],
-          event_name: [:elixirgateway, :rate_limit, :violations],
-          description: "Number of rate limit violations",
-          measurement: :count,
+          event_name: [:elixirgateway, :rate_limit, :exceeded],
+          description: "Total number of rate limit violations",
           tags: [:user_type]
         )
       ]
@@ -266,20 +244,6 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
   end
 
   # Callback functions for polling metrics
-  def execute_connections_total do
-    # This would normally query the actual connection count
-    # For now, return a static value
-    :telemetry.execute([:elixirgateway, :connections, :total], %{count: 0})
-  end
-
-  def execute_rate_limits do
-    # This would normally query rate limit violations from Hammer
-    # For now, return static values
-    :telemetry.execute([:elixirgateway, :rate_limit, :violations], %{count: 0}, %{
-      user_type: "anonymous"
-    })
-  end
-
   def execute_cluster_health do
     # Get cluster health information from the manager
     case Process.whereis(ElixirGateway.Cluster.Manager) do
