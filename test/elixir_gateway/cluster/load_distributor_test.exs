@@ -201,6 +201,66 @@ defmodule ElixirGateway.Cluster.LoadDistributorTest do
     end
   end
 
+  describe "node_has_service?/2" do
+    setup do
+      original_gateway = Application.get_env(:elixirgateway, :gateway)
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{
+          "api.example.com" => "http://localhost:8080",
+          "*.wildcard.com" => "http://localhost:9090",
+          "default_any" => "http://localhost:3000"
+        }
+      )
+
+      # LoadDistributor is already running (started by outer setup); refresh so it
+      # picks up the gateway config we just set above.
+      LoadDistributor.refresh_local_services()
+
+      on_exit(fn ->
+        if original_gateway do
+          Application.put_env(:elixirgateway, :gateway, original_gateway)
+        else
+          Application.delete_env(:elixirgateway, :gateway)
+        end
+      end)
+
+      :ok
+    end
+
+    test "returns true for exact host match on local node" do
+      assert LoadDistributor.node_has_service?(node(), "api.example.com")
+    end
+
+    test "returns true for wildcard host match on local node" do
+      assert LoadDistributor.node_has_service?(node(), "sub.wildcard.com")
+    end
+
+    test "returns true when default_any is configured" do
+      assert LoadDistributor.node_has_service?(node(), "unknown.host.com")
+    end
+
+    test "returns false for unknown host when no default_any" do
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"api.example.com" => "http://localhost:8080"}
+      )
+
+      LoadDistributor.refresh_local_services()
+
+      refute LoadDistributor.node_has_service?(node(), "other.com")
+    end
+
+    test "returns false for unknown node" do
+      refute LoadDistributor.node_has_service?(:unknown@node, "api.example.com")
+    end
+
+    test "local node services are cached at init time" do
+      {_total, nodes} = LoadDistributor.get_active_node_weights()
+      assert Map.has_key?(nodes, node())
+      assert is_list(nodes[node()].services)
+    end
+  end
+
   describe "cleanup of old requests" do
     test "old request data is cleaned up" do
       # Record some requests

@@ -345,15 +345,15 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
            read_length: 1_000_000,
            read_timeout: 15_000
          ) do
-      {:ok, body, conn} ->
-        {body, conn}
+      {:ok, body, _conn} ->
+        body
 
       {:more, partial_body, conn} ->
         # For large binary files, read in chunks
         read_remaining_body(conn, partial_body)
 
       {:error, _reason} ->
-        {"", conn}
+        ""
     end
   end
 
@@ -363,9 +363,9 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
            read_length: 1_000_000,
            read_timeout: 15_000
          ) do
-      {:ok, body, conn} -> {acc_body <> body, conn}
+      {:ok, body, _conn} -> acc_body <> body
       {:more, partial_body, conn} -> read_remaining_body(conn, acc_body <> partial_body)
-      {:error, _reason} -> {acc_body, conn}
+      {:error, _reason} -> acc_body
     end
   end
 

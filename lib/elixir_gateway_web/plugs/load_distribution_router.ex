@@ -70,7 +70,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
         ConnectionRegistry.register_session(conn, node())
         assign(conn, :target_node, :local)
 
-      service_available_on_node?(selected_node, host) ->
+      LoadDistributor.node_has_service?(selected_node, host) ->
         Logger.debug("New session assigned to remote node: #{selected_node}")
         ConnectionRegistry.register_session_on_remote(conn, selected_node)
         assign(conn, :target_node, {:remote, selected_node})
@@ -83,9 +83,5 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
         ConnectionRegistry.register_session(conn, node())
         assign(conn, :target_node, :local)
     end
-  end
-
-  defp service_available_on_node?(remote_node, host) do
-    LoadDistributor.node_has_service?(remote_node, host)
   end
 end

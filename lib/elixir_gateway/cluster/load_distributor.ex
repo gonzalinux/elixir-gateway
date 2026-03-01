@@ -35,7 +35,8 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   @typedoc "Node weights shared when connected"
   @type node_weights :: %{
           weight: integer(),
-          node: node()
+          node: node(),
+          services: [String.t()]
         }
 
   @table_name :elixirgateway_load_distributor
@@ -359,6 +360,18 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
     {:reply, result, state}
   end
 
+  @impl true
+  def handle_call(:refresh_local_services, _from, state) do
+    services = get_local_service_keys()
+
+    nodes =
+      Map.update!(state.nodes, node(), fn node_info ->
+        %{node_info | services: services}
+      end)
+
+    {:reply, :ok, %{state | nodes: nodes}}
+  end
+
   @doc """
   Returns true if the given node has a service configured for the host.
 
@@ -367,6 +380,15 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   """
   def node_has_service?(node_name, host) do
     GenServer.call(__MODULE__, {:node_has_service, node_name, host})
+  end
+
+  @doc """
+  Refreshes the local node's cached service keys from the current application config.
+
+  Useful when gateway services are updated at runtime without a full restart.
+  """
+  def refresh_local_services do
+    GenServer.call(__MODULE__, :refresh_local_services)
   end
 
   # Private Functions
@@ -408,8 +430,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   end
 
   defp get_local_service_keys do
-    Application.get_env(:elixirgateway, :gateway)[:services]
-    |> case do
+    case Application.get_env(:elixirgateway, :gateway)[:services] do
       nil -> []
       services -> Map.keys(services)
     end
@@ -425,7 +446,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
 
       String.starts_with?(key, "*") ->
         suffix = String.slice(key, 1..-1//1)
-        String.ends_with?(host, suffix) or host == suffix
+        String.ends_with?(host, suffix)
 
       true ->
         false
