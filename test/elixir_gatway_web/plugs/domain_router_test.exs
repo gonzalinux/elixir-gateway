@@ -148,6 +148,58 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
     end
   end
 
+  describe "resolve_service/1" do
+    setup do
+      original_config = Application.get_env(:elixirgateway, :gateway)
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{
+          "api.example.com" => "http://backend1.local:8080",
+          "*.wildcard.com" => "http://wildcard.local:7070",
+          "default_any" => "http://fallback.local:4000"
+        }
+      )
+
+      on_exit(fn ->
+        if original_config do
+          Application.put_env(:elixirgateway, :gateway, original_config)
+        else
+          Application.delete_env(:elixirgateway, :gateway)
+        end
+      end)
+
+      :ok
+    end
+
+    test "returns URL for exact match" do
+      assert DomainRouter.resolve_service("api.example.com") == "http://backend1.local:8080"
+    end
+
+    test "returns URL for wildcard match" do
+      assert DomainRouter.resolve_service("sub.wildcard.com") == "http://wildcard.local:7070"
+    end
+
+    test "returns default_any URL for unknown host" do
+      assert DomainRouter.resolve_service("unknown.host.com") == "http://fallback.local:4000"
+    end
+
+    test "returns nil when no service matches and no default_any" do
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"api.example.com" => "http://backend1.local:8080"}
+      )
+
+      assert DomainRouter.resolve_service("other.com") == nil
+    end
+
+    test "returns nil for 'default' host when no default key configured" do
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"api.example.com" => "http://backend1.local:8080"}
+      )
+
+      assert DomainRouter.resolve_service("default") == nil
+    end
+  end
+
   describe "configuration edge cases" do
     test "handles missing gateway config gracefully" do
       Application.delete_env(:elixirgateway, :gateway)

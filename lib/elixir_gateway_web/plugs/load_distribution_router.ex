@@ -62,17 +62,26 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
 
   defp handle_new_session(conn) do
     selected_node = LoadDistributor.select_node_for_new_session()
+    host = conn.assigns[:original_host]
 
-    if selected_node == node() do
-      # Assign to local node
-      Logger.debug("New session assigned to local node")
-      ConnectionRegistry.register_session(conn, node())
-      assign(conn, :target_node, :local)
-    else
-      # Assign to remote node
-      Logger.debug("New session assigned to remote node: #{selected_node}")
-      ConnectionRegistry.register_session_on_remote(conn, selected_node)
-      assign(conn, :target_node, {:remote, selected_node})
+    cond do
+      selected_node == node() ->
+        Logger.debug("New session assigned to local node")
+        ConnectionRegistry.register_session(conn, node())
+        assign(conn, :target_node, :local)
+
+      LoadDistributor.node_has_service?(selected_node, host) ->
+        Logger.debug("New session assigned to remote node: #{selected_node}")
+        ConnectionRegistry.register_session_on_remote(conn, selected_node)
+        assign(conn, :target_node, {:remote, selected_node})
+
+      true ->
+        Logger.info(
+          "Service #{host} not configured on #{selected_node}, routing to local node instead"
+        )
+
+        ConnectionRegistry.register_session(conn, node())
+        assign(conn, :target_node, :local)
     end
   end
 end

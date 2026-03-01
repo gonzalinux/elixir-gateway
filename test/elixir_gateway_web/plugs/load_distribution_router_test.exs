@@ -168,6 +168,53 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
     end
   end
 
+  describe "service availability check for new sessions" do
+    setup do
+      original_gateway = Application.get_env(:elixirgateway, :gateway)
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"api.example.com" => "http://localhost:8080"}
+      )
+
+      on_exit(fn ->
+        if original_gateway do
+          Application.put_env(:elixirgateway, :gateway, original_gateway)
+        else
+          Application.delete_env(:elixirgateway, :gateway)
+        end
+      end)
+
+      :ok
+    end
+
+    test "routes new session to local when service is configured locally" do
+      conn =
+        conn(:get, "/test")
+        |> Map.put(:remote_ip, {127, 0, 10, 1})
+        |> Plug.Conn.fetch_cookies()
+        |> Plug.Conn.put_req_header("x-session-id", "service-check-local-1")
+        |> Plug.Conn.assign(:original_host, "api.example.com")
+
+      conn = LoadDistributionRouter.call(conn, [])
+
+      assert conn.assigns[:target_node] == :local
+    end
+
+    test "routes to local node (only node) regardless of service check" do
+      # With only one node, selected_node always == node(), so no service check is made
+      conn =
+        conn(:get, "/test")
+        |> Map.put(:remote_ip, {127, 0, 10, 2})
+        |> Plug.Conn.fetch_cookies()
+        |> Plug.Conn.put_req_header("x-session-id", "service-check-single-node")
+        |> Plug.Conn.assign(:original_host, "unconfigured.host.com")
+
+      conn = LoadDistributionRouter.call(conn, [])
+
+      assert conn.assigns[:target_node] == :local
+    end
+  end
+
   describe "edge cases" do
     test "handles connection without session ID" do
       conn =

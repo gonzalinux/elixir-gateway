@@ -150,42 +150,48 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     Logger.info("Executing RPC forwarded request: #{request_data.method} #{request_data.path}")
 
     try do
-      # Build target URL
-      full_url =
-        build_target_url(
-          request_data.target_url,
-          request_data.path,
-          request_data.query
-        )
+      # Re-resolve the target URL on this node using local service configuration.
+      # This ensures each node uses its own service URLs rather than the primary's
+      # pre-resolved URL (which may point to localhost ports that don't exist here).
+      with {:ok, target_url} <- resolve_local_service(request_data.original_host) do
+        full_url = build_target_url(target_url, request_data.path, request_data.query)
 
-      # Prepare headers (already filtered by the primary node)
-      headers = request_data.headers
+        finch_request =
+          Finch.build(
+            String.upcase(request_data.method),
+            full_url,
+            request_data.headers,
+            request_data.body
+          )
 
-      # Build and execute Finch request
-      finch_request =
-        Finch.build(
-          String.upcase(request_data.method),
-          full_url,
-          headers,
-          request_data.body
-        )
+        case Finch.request(finch_request, ElixirGateway.Finch,
+               receive_timeout: 40_000,
+               request_timeout: 40_000
+             ) do
+          {:ok, response} ->
+            Logger.info("RPC forwarded request succeeded: #{response.status}")
+            {:ok, response.status, response.headers, response.body}
 
-      case Finch.request(finch_request, ElixirGateway.Finch,
-             receive_timeout: 40_000,
-             request_timeout: 40_000
-           ) do
-        {:ok, response} ->
-          Logger.info("RPC forwarded request succeeded: #{response.status}")
-          {:ok, response.status, response.headers, response.body}
-
-        {:error, reason} ->
-          Logger.error("RPC forwarded request failed: #{inspect(reason)}")
-          {:error, reason}
+          {:error, reason} ->
+            Logger.error("RPC forwarded request failed: #{inspect(reason)}")
+            {:error, reason}
+        end
       end
     rescue
       error ->
         Logger.error("RPC forwarded request error: #{inspect(error)}")
         {:error, error}
+    end
+  end
+
+  defp resolve_local_service(host) do
+    case ElixirGatewayWeb.Plugs.DomainRouter.resolve_service(host) do
+      nil ->
+        Logger.error("Service not configured on this node for host: #{host}")
+        {:error, :service_not_configured}
+
+      url ->
+        {:ok, url}
     end
   end
 
@@ -339,15 +345,15 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
            read_length: 1_000_000,
            read_timeout: 15_000
          ) do
-      {:ok, body, conn} ->
-        {body, conn}
+      {:ok, body, _conn} ->
+        body
 
       {:more, partial_body, conn} ->
         # For large binary files, read in chunks
         read_remaining_body(conn, partial_body)
 
       {:error, _reason} ->
-        {"", conn}
+        ""
     end
   end
 
@@ -357,9 +363,9 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
            read_length: 1_000_000,
            read_timeout: 15_000
          ) do
-      {:ok, body, conn} -> {acc_body <> body, conn}
+      {:ok, body, _conn} -> acc_body <> body
       {:more, partial_body, conn} -> read_remaining_body(conn, acc_body <> partial_body)
-      {:error, _reason} -> {acc_body, conn}
+      {:error, _reason} -> acc_body
     end
   end
 
