@@ -273,11 +273,11 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
         :ok ->
           Logger.debug("Successfully shared weight with peer #{peer_node}")
 
-        {:badrpc, reason} ->
-          Logger.warning("Failed to share weight with peer #{peer_node}: #{inspect(reason)}")
-
         {:badrpc, {:EXIT, {:noproc, _}}} ->
           Logger.info("Load distribution not enabled on peer #{peer_node}, skipping weight share")
+
+        {:badrpc, reason} ->
+          Logger.warning("Failed to share weight with peer #{peer_node}: #{inspect(reason)}")
 
         other ->
           Logger.warning("Unexpected response from peer #{peer_node}: #{inspect(other)}")
