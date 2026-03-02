@@ -41,6 +41,12 @@ RUN mkdir -p /app /etc/elixirgateway/certs && \
 COPY --from=builder --chown=gateway:gateway /app/_build/${MIX_ENV}/rel/elixirgateway /app
 COPY --chown=gateway:gateway script/docker_entrypoint.sh /app/docker_entrypoint.sh
 
+# Put StaticEpmd in the release ebin so it's in the code path at boot time,
+# before the kernel starts net_sup and resolves the EPMD module.
+RUN EBIN=$(ls -d /app/lib/elixirgateway-*/ebin | head -1) && \
+    EPMD=$(ls -d /app/lib/elixirgateway-*/priv/static_epmd | head -1) && \
+    cp "${EPMD}/Elixir.StaticEpmd.beam" "${EBIN}/"
+
 RUN chmod +x /app/docker_entrypoint.sh
 
 WORKDIR /app
