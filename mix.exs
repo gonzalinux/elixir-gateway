@@ -26,7 +26,7 @@ defmodule ElixirGateway.MixProject do
 
   # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
+  defp elixirc_paths(_), do: ["lib", "priv/static_epmd"]
 
   # Specifies your project dependencies.
   #
