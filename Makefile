@@ -32,6 +32,7 @@ else
 endif
 
 prod: ## Build and deploy with Docker Compose (minimal downtime)
+	git pull
 	docker compose up -d --build --remove-orphans
 
 logs: ## Follow container logs
