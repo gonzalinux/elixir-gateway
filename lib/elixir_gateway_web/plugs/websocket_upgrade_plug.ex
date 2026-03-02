@@ -20,9 +20,14 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
         process_locally(conn, opts)
 
       {:remote, node} ->
-        # Forward to remote node
-        Logger.info("Forwarding request to remote node: #{node}")
-        forward_to_node(conn, node)
+        if websocket_upgrade_request?(conn) do
+          # WebSocket upgrade on a remote-affinitied session - can't transparently proxy
+          Logger.info("Forwarding WebSocket request to remote node: #{node}")
+          forward_to_node(conn, node)
+        else
+          # Regular HTTP request with remote affinity - let LoadDistributionRouter handle it
+          conn
+        end
 
       :new_session ->
         # New session - process locally, load distributor will handle it downstream
@@ -70,9 +75,8 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
 
   defp handle_websocket_upgrade(conn) do
     host = conn.host
-    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
 
-    case Map.get(services, host) do
+    case ElixirGatewayWeb.Plugs.DomainRouter.resolve_service(host) do
       nil ->
         Logger.warning("No service configured for WebSocket host: #{host}")
 
