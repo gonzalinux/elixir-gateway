@@ -56,19 +56,6 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
     end
   end
 
-  defp forward_to_node(conn, _node) do
-    # For WebSocket connections, we can't easily forward to another node
-    # Instead, we return an error and let the client reconnect
-    # The DNS should be updated to point to the correct node
-    Logger.warning("WebSocket affinity conflict - connection exists on different node")
-
-    conn
-    |> put_status(503)
-    |> put_resp_content_type("text/plain")
-    |> send_resp(503, "Service temporarily unavailable - please reconnect")
-    |> halt()
-  end
-
   defp websocket_upgrade_request?(conn) do
     connection_header = get_req_header(conn, "connection") |> List.first("")
     upgrade_header = get_req_header(conn, "upgrade") |> List.first("")

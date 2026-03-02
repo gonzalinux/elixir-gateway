@@ -6,7 +6,7 @@ defmodule ElixirGatewayWeb.HealthController do
   """
 
   def check(conn, _params) do
-    [uptime_total, _uptime_since_last] = :erlang.statistics(:runtime)
+    {uptime_total, _uptime_since_last} = :erlang.statistics(:runtime)
     # Basic health checks
     status = %{
       status: "healthy",
@@ -150,14 +150,12 @@ defmodule ElixirGatewayWeb.HealthController do
   defp check_configuration do
     # Check if gateway configuration is valid
     try do
-      config = Application.get_env(:elixirgateway, :gateway)
+      services = Application.get_env(:elixirgateway, :gateway)[:services]
 
-      case config do
-        %{services: services} when is_map(services) and map_size(services) > 0 ->
-          %{status: "healthy", message: "Gateway configuration valid"}
-
-        _ ->
-          %{status: "unhealthy", message: "Gateway services not configured"}
+      if is_map(services) and map_size(services) > 0 do
+        %{status: "healthy", message: "Gateway configuration valid"}
+      else
+        %{status: "unhealthy", message: "Gateway services not configured"}
       end
     rescue
       _ ->
@@ -167,15 +165,8 @@ defmodule ElixirGatewayWeb.HealthController do
 
   defp check_gateway_services do
     # Check if at least one gateway service is configured
-    config = Application.get_env(:elixirgateway, :gateway)
-
-    case config do
-      %{services: services} when is_map(services) and map_size(services) > 0 ->
-        true
-
-      _ ->
-        false
-    end
+    services = Application.get_env(:elixirgateway, :gateway)[:services]
+    is_map(services) and map_size(services) > 0
   end
 
   defp determine_overall_status(checks) do

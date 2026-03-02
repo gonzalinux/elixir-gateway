@@ -1,0 +1,38 @@
+name: elixirgateway
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - MIX_ENV=${MIX_ENV:-prod}
+        - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+    env_file:
+      - .env
+    environment:
+      - SITE_ENCRYPT_DB=/etc/elixirgateway/certs
+    network_mode: host
+    volumes:
+      - certs:/etc/elixirgateway/certs
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:${HTTP_PORT:-4000}/health || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  certs:
+    driver: local
