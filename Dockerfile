@@ -24,7 +24,8 @@ COPY lib lib
 COPY config config
 COPY priv priv
 
-RUN mix compile && mix release
+RUN mix compile && mix release && \
+    elixirc priv/static_epmd/static_epmd.ex -o priv/static_epmd/
 
 FROM alpine:3.20.3
 
@@ -39,7 +40,7 @@ RUN mkdir -p /app /etc/elixirgateway/certs && \
     chown -R gateway:gateway /app /etc/elixirgateway
 
 COPY --from=builder --chown=gateway:gateway /app/_build/${MIX_ENV}/rel/elixirgateway /app
-COPY --chown=gateway:gateway priv/static_epmd/Elixir.StaticEpmd.beam /app/static_epmd/Elixir.StaticEpmd.beam
+COPY --from=builder --chown=gateway:gateway /app/priv/static_epmd/Elixir.StaticEpmd.beam /app/static_epmd/Elixir.StaticEpmd.beam
 COPY --chown=gateway:gateway script/docker_entrypoint.sh /app/docker_entrypoint.sh
 
 RUN chmod +x /app/docker_entrypoint.sh
