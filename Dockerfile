@@ -49,7 +49,7 @@ USER gateway
 
 ENV HOME=/app
 
-EXPOSE 4000 4001 4002 9100
+EXPOSE 4000 4001 4002 9100-9200
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:4000/health || exit 1
