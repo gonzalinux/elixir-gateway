@@ -24,9 +24,7 @@ COPY lib lib
 COPY config config
 COPY priv priv
 
-RUN mix compile && mix release && \
-    EBIN=$(ls -d _build/${MIX_ENV}/rel/elixirgateway/lib/elixirgateway-*/ebin | head -1) && \
-    cp priv/static_epmd/Elixir.StaticEpmd.beam "${EBIN}/"
+RUN mix compile && mix release
 
 FROM alpine:3.20.3
 
@@ -41,6 +39,7 @@ RUN mkdir -p /app /etc/elixirgateway/certs && \
     chown -R gateway:gateway /app /etc/elixirgateway
 
 COPY --from=builder --chown=gateway:gateway /app/_build/${MIX_ENV}/rel/elixirgateway /app
+COPY --chown=gateway:gateway priv/static_epmd/Elixir.StaticEpmd.beam /app/static_epmd/Elixir.StaticEpmd.beam
 COPY --chown=gateway:gateway script/docker_entrypoint.sh /app/docker_entrypoint.sh
 
 RUN chmod +x /app/docker_entrypoint.sh
@@ -50,7 +49,7 @@ USER gateway
 
 ENV HOME=/app
 
-EXPOSE 4000 4001 4002
+EXPOSE 4000 4001 4002 9100
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:4000/health || exit 1
