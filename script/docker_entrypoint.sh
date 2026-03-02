@@ -11,10 +11,12 @@ if [ "$CLUSTER_ENABLED" = "true" ]; then
   fi
 
   PRIV_DIR=$(ls -d /app/lib/elixirgateway-*/priv | head -1)
+  EBIN=$(ls -d /app/lib/elixirgateway-*/ebin | head -1)
+  cp /app/static_epmd/Elixir.StaticEpmd.beam "$EBIN/"
 
   export RELEASE_DISTRIBUTION=name
   export RELEASE_NODE="${NODE_NAME}_${CLUSTER_PORT:-9100}@${NODE_IP}"
-  export ERL_FLAGS="-pa /app/static_epmd -start_epmd false -epmd_module Elixir.StaticEpmd -proto_dist inet_tls -ssl_dist_optfile ${PRIV_DIR}/ssl_dist.conf -kernel inet_dist_listen_min ${CLUSTER_PORT:-9100} inet_dist_listen_max ${CLUSTER_PORT:-9100}"
+  export ERL_FLAGS="-start_epmd false -epmd_module Elixir.StaticEpmd -proto_dist inet_tls -ssl_dist_optfile ${PRIV_DIR}/ssl_dist.conf -kernel inet_dist_listen_min ${CLUSTER_PORT:-9100} inet_dist_listen_max ${CLUSTER_PORT:-9100}"
 
   echo "Starting node: $RELEASE_NODE"
 fi
