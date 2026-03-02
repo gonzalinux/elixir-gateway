@@ -21,16 +21,24 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
 
       {:remote, node} ->
         if websocket_upgrade_request?(conn) do
-          # WebSocket upgrade on a remote-affinitied session - can't transparently proxy
-          Logger.info("Forwarding WebSocket request to remote node: #{node}")
-          forward_to_node(conn, node)
+          # WS can only run on the node holding the TCP connection (this one).
+          # Re-anchor the session here so subsequent HTTP requests also stay local,
+          # keeping WS and HTTP on the same backend.
+          Logger.info("Re-anchoring WS session from #{node} to local node")
+          ElixirGateway.Cluster.ConnectionRegistry.register_session(conn, node())
+          process_locally(conn, opts)
         else
           # Regular HTTP request with remote affinity - let LoadDistributionRouter handle it
           conn
         end
 
       :new_session ->
-        # New session - process locally, load distributor will handle it downstream
+        if websocket_upgrade_request?(conn) do
+          # Register WS-initiated sessions locally so subsequent HTTP requests
+          # (e.g. LiveView page reloads) land on the same backend.
+          ElixirGateway.Cluster.ConnectionRegistry.register_session(conn, node())
+        end
+
         process_locally(conn, opts)
 
       :not_clustered ->

@@ -40,12 +40,20 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
 
       {:deny, :user, _count} ->
         Logger.warning("User rate limit exceeded for user: #{user_id}")
-        :telemetry.execute([:elixirgateway, :rate_limit, :exceeded], %{count: 1}, %{user_type: "user"})
+
+        :telemetry.execute([:elixirgateway, :rate_limit, :exceeded], %{count: 1}, %{
+          user_type: "user"
+        })
+
         send_rate_limit_response(conn, user_requests_per_minute, "User rate limit exceeded")
 
       {:deny, :ip, _count} ->
         Logger.warning("IP rate limit exceeded for IP: #{ip_address}")
-        :telemetry.execute([:elixirgateway, :rate_limit, :exceeded], %{count: 1}, %{user_type: "ip"})
+
+        :telemetry.execute([:elixirgateway, :rate_limit, :exceeded], %{count: 1}, %{
+          user_type: "ip"
+        })
+
         send_rate_limit_response(conn, ip_requests_per_minute, "IP rate limit exceeded")
     end
   end

@@ -438,26 +438,18 @@ defmodule ElixirGateway.Cluster.ConnectionRegistry do
   end
 
   defp get_session_id(conn) do
-    # Try multiple methods to get a session identifier
-    # 1. WebSocket session from Sec-WebSocket-Key
-    # 2. Session cookie
-    # 3. Custom session header
-    # 4. Default to nil
-
+    # Intentionally does NOT use Sec-WebSocket-Key: that header is random per connection
+    # and would create a separate registry entry for every WS upgrade, breaking affinity
+    # with the HTTP session that preceded it. Using cookie/X-Session-ID ensures WS and
+    # HTTP requests from the same browser share the same registry entry and land on the
+    # same backend node.
     cond do
-      # WebSocket session key
-      ws_key = Plug.Conn.get_req_header(conn, "sec-websocket-key") |> List.first() ->
-        ws_key
-
-      # Session cookie (Phoenix default)
       session = conn.cookies["_elixirgateway_key"] ->
         session
 
-      # Custom session header
       session = Plug.Conn.get_req_header(conn, "x-session-id") |> List.first() ->
         session
 
-      # No session identifier
       true ->
         nil
     end
