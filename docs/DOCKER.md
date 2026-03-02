@@ -1,80 +1,85 @@
-# ElixirGateway Docker Deployment Guide
+# Docker Deployment
 
-This guide explains how to build, configure, and deploy ElixirGateway using Docker containers.
+ElixirGateway runs as an Elixir release in a minimal Alpine container using `network_mode: host`.
 
-## Quick Start
-
-### Build the Docker Image
+## Deploy
 
 ```bash
-# Build the production image
-docker build -t elixirgateway:latest .
-
-# Build with a specific tag
-docker build -t elixirgateway:1.0.0 .
+make prod       # git pull + docker compose up -d --build
+make logs       # follow logs
+make stop       # stop containers
 ```
 
-### Run the Container
+## Environment Variables
+
+Create a `.env` file at the project root. All configuration is injected at container startup — no rebuild needed for env changes, just `docker compose up -d --force-recreate`.
+
+### Required
 
 ```bash
-# Basic run (development/testing)
-docker run -p 4000:4000 -p 4001:4001 -p 4002:4002 elixirgateway:latest
-
-# Production run with environment variables
-docker run -d \
-  --name elixirgateway \
-  -p 4000:4000 \
-  -p 4001:4001 \
-  -p 4002:4002 \
-  -e SECRET_KEY_BASE="$(openssl rand -base64 64)" \
-  -e PHX_HOST="api.yourdomain.com" \
-  -e LETSENCRYPT_DOMAINS="api.yourdomain.com,app.yourdomain.com" \
-  -e LETSENCRYPT_EMAIL="admin@yourdomain.com" \
-  -v /etc/ssl/elixirgateway:/etc/elixirgateway/certs \
-  elixirgateway:latest
+SECRET_KEY_BASE=        # mix phx.gen.secret
+GATEWAY_SERVICES=       # "host=>target;host=>target" (see below)
 ```
 
-## Docker Image Details
-
-### Multi-Stage Build
-
-The Dockerfile uses a multi-stage build process for optimal image size:
-
-1. **Builder Stage**: Uses Elixir/Alpine image to compile and create release
-2. **Runtime Stage**: Uses minimal Alpine image with only runtime dependencies
-
-### Image Specifications
-
-- **Base Image**: Alpine Linux 3.18.4
-- **Runtime**: Erlang/OTP with Elixir release
-- **Size**: ~50MB (compared to ~200MB+ with full Elixir image)
-- **User**: Runs as non-root user `gateway` (UID: 1000)
-- **Ports**: 4000 (HTTP), 4001 (HTTPS)
-
-### Built-in Health Check
-
-The image includes a health check that runs every 30 seconds:
-```bash
-curl -f http://localhost:4000/health || exit 1
-```
-
-## Configuration
-
-### Environment Variables
-
-All environment variables from the main setup guide are supported:
+### Gateway Services
 
 ```bash
-# Required for production
-export SECRET_KEY_BASE="$(openssl rand -base64 64)"
-export PHX_HOST="api.yourdomain.com"
-
-# SSL Configuration
-export LETSENCRYPT_DOMAINS="api.yourdomain.com,app.yourdomain.com"
-export LETSENCRYPT_EMAIL="admin@yourdomain.com"
-
-# Optional
-export HTTP_PORT="4000"
-export HTTPS_PORT="4001"
-export DNS_CLUSTER_QUERY="api.cluster.local"
+# Format: semicolon-separated host=>target mappings
+GATEWAY_SERVICES="api.example.com=>http://localhost:8080;app.example.com=>http://localhost:3000;default_any=>http://localhost:8000"
 ```
+
+### Common Options
+
+```bash
+HTTP_PORT=4000
+HTTPS_PORT=4001
+RATE_LIMIT_USER=100
+RATE_LIMIT_IP=500
+BOT_BLOCKER_ENABLED=true
+METRICS_AUTH_TOKEN=        # optional, protects /metrics
+```
+
+### Clustering (optional)
+
+Required when running multiple nodes. The primary node initiates connections; secondary nodes accept them.
+
+```bash
+# Both nodes
+CLUSTER_ENABLED=true
+CLUSTER_SECRET=            # mix elixir_gateway.gen.cluster_secret
+CLUSTER_PORT=9100
+NODE_NAME=serverA          # unique per node
+
+# Primary only (knows the secondary's address)
+CLUSTER_PEERS="serverB_9101@1.2.3.4"
+
+# NODE_IP is auto-detected via curl if not set
+NODE_IP=                   # optional override
+```
+
+#### How clustering works in Docker
+
+The entrypoint (`script/docker_entrypoint.sh`) runs before the release starts. When `CLUSTER_ENABLED=true` it:
+1. Auto-detects `NODE_IP` if not set
+2. Sets `RELEASE_NODE` and `RELEASE_DISTRIBUTION=name` so the VM starts in distributed mode
+3. Sets `ERL_FLAGS` with TLS distribution flags (`-proto_dist inet_tls`, `-epmd_module Elixir.StaticEpmd`, etc.)
+
+`StaticEpmd` is compiled into the application (via `elixirc_paths` in `mix.exs`) so it's available to the Erlang kernel at boot in embedded mode.
+
+## MIX_ENV
+
+```bash
+# Default: prod (Elixir release, slim Alpine image)
+make prod
+
+# Dev mode (all deps, same release mechanism)
+MIX_ENV=dev docker compose up -d --build
+```
+
+## Image Details
+
+- **Builder**: `hexpm/elixir:1.17.3-erlang-27.1.2-alpine-3.20.3`
+- **Runtime**: `alpine:3.20.3` + bundled ERTS (no Elixir/Mix at runtime)
+- **User**: non-root `gateway` (UID 1000)
+- **Network**: `host` mode (required for clustering and port binding)
+- **Health check**: `GET /health` every 30s

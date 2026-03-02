@@ -14,7 +14,8 @@ config :elixirgateway, :gateway,
     "admin.example.com" => "https://192.168.1.11:8443"
   },
   rate_limit: [
-    requests_per_minute: 100,
+    user_requests_per_minute: 100,
+    ip_requests_per_minute: 500,
     cleanup_interval: :timer.minutes(1)
   ]
 ```
@@ -111,7 +112,8 @@ Configure rate limits per user:
 ```elixir
 config :elixirgateway, :gateway,
   rate_limit: [
-    requests_per_minute: 100,
+    user_requests_per_minute: 100,
+    ip_requests_per_minute: 500,
     cleanup_interval: :timer.minutes(1)
   ]
 ```

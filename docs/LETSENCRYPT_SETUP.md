@@ -37,15 +37,11 @@ admin.yourdomain.com    A    192.168.1.100
 # Production (SiteEncrypt automatically enabled)
 MIX_ENV=prod mix phx.server
 
-# Development with Let's Encrypt (optional)
-LETSENCRYPT_ENABLED=true mix phx.server
-
-# Or with releases
-MIX_ENV=prod mix release
-_build/prod/rel/elixir_gateway/bin/elixir_gateway start
+# Or with Docker
+make prod
 ```
 
-**Note**: SiteEncrypt only starts in production by default. In development, set `LETSENCRYPT_ENABLED=true` to test Let's Encrypt functionality.
+**Note**: SiteEncrypt is enabled automatically in production. In development, self-signed certificates are used instead.
 
 ## 🔧 How It Works
 
