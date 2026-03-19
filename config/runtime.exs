@@ -145,11 +145,16 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
           ip -> {:static, ip}
         end
 
+      failover_timeout_seconds =
+        System.get_env("DNS_FAILOVER_TIMEOUT", "5")
+        |> String.to_integer()
+
       [
         enabled: true,
         provider: :namecheap_ddns,
         public_ip_method: public_ip_method,
-        domains: domains
+        domains: domains,
+        failover_timeout: failover_timeout_seconds * 1_000
       ]
     else
       [enabled: false]

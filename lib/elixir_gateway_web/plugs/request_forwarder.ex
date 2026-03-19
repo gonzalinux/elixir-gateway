@@ -279,7 +279,6 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         "trailer",
         "transfer-encoding",
         "upgrade",
-        "host",
         "content-length"
       ])
 

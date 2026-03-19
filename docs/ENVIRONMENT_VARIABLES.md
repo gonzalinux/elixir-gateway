@@ -354,6 +354,18 @@ Enable automatic DNS updates when cluster peers fail. Requires clustering to be 
 DNS_FAILOVER_ENABLED="true"
 ```
 
+### DNS_FAILOVER_TIMEOUT
+**Type:** Integer (seconds)
+**Required:** No
+**Default:** 5
+**Used in:** `config/runtime.exs`
+
+Seconds to wait after cluster peers become unhealthy before triggering a DNS failover. If peers recover within this window, the failover is cancelled.
+
+```bash
+DNS_FAILOVER_TIMEOUT="30"
+```
+
 ### PUBLIC_IP_STATIC
 **Type:** String (IP address)
 **Required:** No
