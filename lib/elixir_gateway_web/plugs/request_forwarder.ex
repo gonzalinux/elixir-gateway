@@ -301,10 +301,17 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       ])
 
     Enum.reduce(headers, conn, fn {name, value}, acc_conn ->
-      if not MapSet.member?(excluded_headers, String.downcase(name)) do
-        put_resp_header(acc_conn, String.downcase(name), value)
-      else
-        acc_conn
+      downcased = String.downcase(name)
+
+      cond do
+        MapSet.member?(excluded_headers, downcased) ->
+          acc_conn
+
+        downcased == "set-cookie" ->
+          prepend_resp_headers(acc_conn, [{"set-cookie", value}])
+
+        true ->
+          put_resp_header(acc_conn, downcased, value)
       end
     end)
   end
