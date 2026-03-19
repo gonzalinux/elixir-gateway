@@ -68,14 +68,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlug do
           end
 
         Logger.warning("Metrics access denied: IP #{ip_string} not in private network")
-
         conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(
-          403,
-          "Forbidden: Metrics endpoint restricted to private networks. Your IP: #{ip_string}"
-        )
-        |> halt()
     end
   end
 
