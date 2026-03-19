@@ -279,14 +279,18 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         "trailer",
         "transfer-encoding",
         "upgrade",
+        "host",
         "content-length"
       ])
 
-    conn.req_headers
-    |> Enum.reject(fn {name, _value} ->
-      MapSet.member?(excluded_headers, String.downcase(name))
-    end)
-    |> Enum.map(fn {name, value} -> {name, value} end)
+    filtered =
+      conn.req_headers
+      |> Enum.reject(fn {name, _value} ->
+        MapSet.member?(excluded_headers, String.downcase(name))
+      end)
+
+    original_host = conn.assigns[:original_host] || conn.host
+    [{"host", original_host} | filtered]
   end
 
   defp put_response_headers(conn, headers) do
