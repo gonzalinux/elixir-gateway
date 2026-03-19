@@ -75,7 +75,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlug do
           404,
           ""
         )
-        |> n()
+        |> halt()
     end
   end
 
