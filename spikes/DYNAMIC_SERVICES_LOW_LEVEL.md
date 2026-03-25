@@ -204,6 +204,25 @@ Handles requests on the internal server.
 `GET /services` (optional, for observability)
 - Return full dynamic registry as JSON. Useful for debugging.
 
+`POST /custom-domains`
+- Validate required fields: `domain` (string), `service` (string, must match a known
+  service name in gateway.yaml or dynamic registry).
+- Add to `CustomDomainRegistry` with `cert_state: "pending"`.
+- Trigger async ACME HTTP-01 cert issuance.
+- Response 200: `{ "domain": "...", "cert_state": "pending" }`.
+- Response 422: validation error.
+
+`GET /custom-domains/:domain`
+- Return current state of a registered custom domain.
+- Response 200: `{ "domain": "...", "cert_state": "pending|issued|failed", "expires_at": "..." }`.
+- Response 404: domain not registered.
+
+`DELETE /custom-domains/:domain`
+- Remove domain from `CustomDomainRegistry`.
+- Delete cert files from disk (`certs/custom/:domain/`).
+- Response 200: ok.
+- Called by the upstream service when a user removes their custom domain.
+
 ---
 
 ### Changes to `ElixirGatewayWeb.Plugs.DomainRouter`
@@ -215,8 +234,13 @@ Reads `Application.get_env(:elixirgateway, :gateway)[:services]` on every reques
 1. Call `ServiceRegistry.lookup(host)` first.
 2. If it returns a non-empty list: pick a target via weighted random, assign to
    `conn.assigns[:target_url]`.
-3. If it returns empty: fall through to existing static config lookup (current
-   logic unchanged).
+3. If it returns empty: call `CustomDomainRegistry.lookup(host)`.
+4. If it returns a match: resolve the service name to a target (check dynamic registry
+   first, then static config), assign to `conn.assigns[:target_url]`. Preserve the
+   original `Host` header — the upstream service uses it to identify the tenant.
+5. If no custom domain match: fall through to static config from `ConfigLoader` (replaces
+   the previous `Application.get_env(:elixirgateway, :gateway)[:services]` lookup).
+6. If no static match: 404.
 
 **Weighted random selection (in DomainRouter, not registry):**
 - Receive `[{target, weight}, ...]` from registry.
@@ -240,25 +264,36 @@ Reads `Application.get_env(:elixirgateway, :gateway)[:services]` on every reques
 
 Add to the supervision tree (before Endpoint):
 ```
+ElixirGateway.ConfigLoader
+ElixirGateway.DiskPersistence
 ElixirGateway.ServiceRegistry
 ElixirGateway.TransitionScheduler
 ElixirGateway.HealthChecker
-ElixirGateway.DiskPersistence
+ElixirGateway.CustomDomainRegistry
+ElixirGateway.AcmeClient
+ElixirGateway.CertRenewalScheduler
 ElixirGateway.InternalServer
 ```
 
-Order matters: ServiceRegistry must start before HealthChecker and
-TransitionScheduler. DiskPersistence is initialized by ServiceRegistry during its
-own init so it needs to be started first.
+Order matters:
+- `ConfigLoader` must start first — all other components read static config from it.
+- `DiskPersistence` before `ServiceRegistry` — registry reads disk during its own init.
+- `ServiceRegistry` before `HealthChecker` and `TransitionScheduler`.
+- `AcmeClient` before `CustomDomainRegistry` — registry triggers cert issuance on
+  startup for any domain with `cert_state: "pending"`.
 
 Revised order:
-1. DiskPersistence
-2. ServiceRegistry (reads disk in init, then schedules any in-progress transitions)
-3. TransitionScheduler
-4. HealthChecker
-5. InternalServer
-6. ... existing children ...
-7. Endpoint
+1. ConfigLoader (reads gateway.yaml, makes static config available)
+2. DiskPersistence
+3. ServiceRegistry (reads disk in init, then schedules any in-progress transitions)
+4. TransitionScheduler
+5. HealthChecker
+6. AcmeClient
+7. CustomDomainRegistry (reads custom_domains.json, resumes pending cert issuances)
+8. CertRenewalScheduler
+9. InternalServer
+10. ... existing children ...
+11. Endpoint
 
 ---
 
@@ -320,9 +355,10 @@ Optional:
 
 | Env Var                  | Default        | Description                                  |
 |--------------------------|----------------|----------------------------------------------|
+| `GATEWAY_CONFIG_FILE`    | `priv/gateway.yaml` | Path to gateway.yaml. See `GATEWAY_CONFIG_SSL_AND_CUSTOM_DOMAINS.md`. |
 | `INTERNAL_API_PORT`      | `4001`         | Port for the internal registration API       |
 | `INTERNAL_API_BIND_IP`   | `127.0.0.1`    | IP to bind the internal listener to          |
-| `DYNAMIC_SERVICES_DIR`   | priv dir       | Directory for dynamic_services.json          |
+| `DYNAMIC_SERVICES_DIR`   | priv dir       | Directory for dynamic_services.json and custom_domains.json |
 | `HEALTH_CHECK_INTERVAL`  | `30000`        | Health check interval in milliseconds        |
 | `HEALTH_CHECK_TIMEOUT`   | `5000`         | Per-request health check timeout in ms       |
 | `HEALTH_MAX_FAILURES`    | `3`            | Consecutive failures before eviction         |
@@ -333,6 +369,7 @@ Optional:
 
 ```
 lib/elixir_gateway/
+  config_loader.ex             ← reads gateway.yaml, ${} substitution, exposes static config
   services/
     service_registry.ex        ← GenServer + ETS
     transition_scheduler.ex    ← timer management
@@ -340,9 +377,29 @@ lib/elixir_gateway/
     disk_persistence.ex        ← async JSON writer
     internal_server.ex         ← Bandit listener setup
     internal_controller.ex     ← Plug router + request handling
+  custom_domains/
+    custom_domain_registry.ex  ← GenServer + ETS, cert state tracking
+    acme_client.ex             ← ACME v2 HTTP-01 cert issuance via Req
+    cert_renewal_scheduler.ex  ← daily scan, renews certs expiring within 30 days
+  cluster/
+    ddns/
+      namecheap.ex             ← existing
+      cloudflare.ex            ← new: Cloudflare DNS A record updater
 
 data/
-  dynamic_services.json        ← persisted registry (written at runtime)
+  dynamic_services.json        ← persisted service registry (written at runtime)
+  custom_domains.json          ← persisted custom domain registry (written at runtime)
+
+certs/
+  site_encrypt/                ← managed by SiteEncrypt (existing domains, HTTP-01)
+  wildcard/                    ← managed by acme.sh (wildcard certs, DNS-01)
+    writeinone.com/
+      cert.pem
+      key.pem
+  custom/                      ← managed by AcmeClient (per user-domain certs, HTTP-01)
+    blog.johndoe.com/
+      cert.pem
+      key.pem
 ```
 
 ---
@@ -356,8 +413,9 @@ data/
   a no-op (idempotent). Useful for services that register on startup regardless.
 - **Transition on host with no existing version**: No transition is started even if
   a schedule is provided. The new version goes directly to 100%.
-- **All instances of both versions evicted during transition**: Host entry removed,
-  falls back to static config or 404. No orphaned TransitionState.
+- **All instances of both versions evicted during transition**: Host entry removed.
+  DomainRouter falls through to custom domain registry, then static config, then 404.
+  No orphaned TransitionState.
 - **Internal API port conflict**: Document clearly in env var config. The default
   must not collide with common development service ports.
 - **Cluster nodes**: No sync between nodes. A service registers on the node it can

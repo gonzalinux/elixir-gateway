@@ -74,15 +74,21 @@ disk (`dynamic_services.json`). On gateway restart, this file is loaded to resto
 the registry to its last known state. Writes are atomic (write to a temp file then
 rename) to prevent corruption.
 
-### 7. Static + Dynamic Config Coexistence
-Two separate configuration sources exist:
-- **Static services**: the existing config file / environment variable approach,
-  unchanged. Used as a fallback and for infrastructure-level routing that does not
-  need dynamic updates.
-- **Dynamic services**: the runtime registry managed by service self-registration.
+### 7. Three-Layer Config Coexistence
+Three configuration sources exist, checked in order on every request:
 
-When routing a request, the dynamic registry is checked first. Static config is
-used only if no dynamic entry exists for the host.
+- **Dynamic services** (`dynamic_services.json`): the runtime registry managed by
+  service self-registration. Checked first. Wins for any host it knows about.
+- **Custom domains** (`custom_domains.json`): user-registered domains for multi-tenant
+  services (e.g. writeinone users pointing their own domain at the gateway). Each entry
+  maps a domain to a named service and carries SSL cert state. See
+  `GATEWAY_CONFIG_SSL_AND_CUSTOM_DOMAINS.md` for the full spec.
+- **Static services** (`gateway.yaml`): infrastructure-level routing declared by the
+  operator. Used as final fallback. Replaces the flat `GATEWAY_SERVICES`,
+  `LETSENCRYPT_DOMAINS`, and `DDNS_DOMAINS` environment variables. See
+  `GATEWAY_CONFIG_SSL_AND_CUSTOM_DOMAINS.md` for the schema.
+
+If no source matches the host, the gateway returns 404.
 
 ### 8. Internal-Only Registration API
 The registration API is exposed on a separate port bound exclusively to internal
@@ -94,10 +100,13 @@ stricter by using a dedicated listener rather than authentication.
 
 - The gateway will not notify services to shut down. Services manage their own
   lifecycle and shut down when appropriate.
-- Explicit deregistration is not supported. Services leave the registry only via
-  health check eviction.
-- No cross-node registry synchronization. Each cluster node maintains its own
-  independent registry.
+- Explicit deregistration of backend instances is not supported. Services leave the
+  registry only via health check eviction. Note: custom domain entries (the third config
+  layer) do support explicit deletion via `DELETE /custom-domains/:domain` since a user
+  may remove their domain at any time.
+- No cross-node registry synchronization for backend instances. Each cluster node
+  maintains its own independent registry. Custom domain cert files are synced to
+  secondary nodes via the existing `CertificateManager` RPC mechanism.
 
 ## Future Work
 
@@ -122,24 +131,36 @@ so no client library is required for them.
 ## High Level Component Map
 
 ```
+Startup
+      │
+      ▼
+[ConfigLoader]                 ← reads gateway.yaml, performs ${} substitution,
+                                  produces static routing table + SSL domain list
+                                  + DDNS config (Namecheap or Cloudflare per service)
+
 Internal Network
       │
       ▼
 [Internal API Server]          ← separate port, internal interfaces only
       │
-      ▼
-[ServiceRegistry GenServer]    ← authoritative in-memory state (ETS)
+      ├──► [ServiceRegistry GenServer]    ← authoritative in-memory state (ETS)
+      │          │
+      │          ├──► [TransitionScheduler]   ← advances canary phases on timers
+      │          ├──► [HealthChecker]         ← periodic polling, evicts failed instances
+      │          └──► [DiskPersistence]       ← async atomic writes to dynamic_services.json
       │
-      ├──► [TransitionScheduler]   ← advances canary phases on timers
-      ├──► [HealthChecker]         ← periodic polling, evicts failed instances
-      └──► [DiskPersistence]       ← async atomic writes to dynamic_services.json
-                                      read on startup to restore state
+      └──► [CustomDomainRegistry GenServer]  ← maps user domains to services + cert state
+                 │
+                 ├──► [AcmeClient]           ← issues HTTP-01 certs per custom domain
+                 └──► [CertRenewalScheduler] ← daily scan, renews certs expiring in <30 days
 
 Public Internet
       │
       ▼
 [Existing pipeline: BotBlocker → RateLimiter → WebSocket → DomainRouter → ...]
                                                                   │
-                                                    reads dynamic registry first,
-                                                    falls back to static config
+                                                    1. dynamic registry (ServiceRegistry)
+                                                    2. custom domains (CustomDomainRegistry)
+                                                    3. static config (gateway.yaml)
+                                                    4. 404
 ```
