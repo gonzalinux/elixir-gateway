@@ -11,35 +11,35 @@
 
 services:
 
-  seveneat:
-    target: http://192.168.2.160:8443
+  service1:
+    target: http://localhost:8080
     domains:
-      - "*.seveneat.com"
-      - seveneat.com
+      - "*.service1.com"
+      - service1.com
     ssl: true
     ddns:
       provider: namecheap
       record: "@"
-      domain: seveneat.com
+      domain: service1.com
       token: "${SEVENEAT_DDNS_TOKEN}"
 
-  en2fe:
+  service2:
     target: http://192.168.2.151:4000
     domains:
-      - "*.en2fe.com"
-      - en2fe.com
+      - "*.service2.com"
+      - service2.com
     ssl: true
     ddns:
       provider: namecheap
       record: "@"
-      domain: en2fe.com
+      domain: service2.com
       token: "${EN2FE_DDNS_TOKEN}"
 
   # SSL only, no DDNS needed
-  gonzalo_blog:
+  service3:
     target: http://192.168.2.151:4000
     domains:
-      - blog.gonzalo-leon.site
+      - blog.service3.site
     ssl: true
 
   # Wildcard cert via DNS-01 (Cloudflare), see GATEWAY_CONFIG_SSL_AND_CUSTOM_DOMAINS.md

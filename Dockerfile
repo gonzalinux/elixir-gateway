@@ -41,6 +41,7 @@ RUN mkdir -p /app /etc/elixirgateway/certs && \
 
 COPY --from=builder --chown=gateway:gateway /app/_build/${MIX_ENV}/rel/elixirgateway /app
 COPY --from=builder --chown=gateway:gateway /app/priv/static_epmd/Elixir.StaticEpmd.beam /app/static_epmd/Elixir.StaticEpmd.beam
+COPY --from=builder --chown=gateway:gateway /app/priv/gateway.yaml /app/priv/gateway.yaml
 COPY --chown=gateway:gateway script/docker_entrypoint.sh /app/docker_entrypoint.sh
 
 RUN chmod +x /app/docker_entrypoint.sh
