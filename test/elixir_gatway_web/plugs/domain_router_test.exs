@@ -16,6 +16,10 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
           "admin.example.com" => "https://backend2.local:9443",
           "default" => "http://default.local:3000",
           "default_any" => "http://fallback.local:4000"
+        },
+        force_https: %{
+          "api.example.com" => true,
+          "admin.example.com" => true
         }
       )
 
@@ -38,6 +42,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
 
       assert conn.assigns[:target_url] == "http://backend1.local:8080"
       assert conn.assigns[:original_host] == "api.example.com"
+      assert conn.assigns[:force_https] == true
       refute conn.halted
     end
 
@@ -49,6 +54,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
 
       assert conn.assigns[:target_url] == "https://backend2.local:9443"
       assert conn.assigns[:original_host] == "admin.example.com"
+      assert conn.assigns[:force_https] == true
       refute conn.halted
     end
 
@@ -74,6 +80,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
 
       assert conn.assigns[:target_url] == "http://fallback.local:4000"
       assert conn.assigns[:original_host] == "unknown.example.com"
+      assert conn.assigns[:force_https] == false
       refute conn.halted
     end
 
@@ -197,6 +204,75 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
       )
 
       assert DomainRouter.resolve_service("default") == nil
+    end
+  end
+
+  describe "force_https assignment" do
+    setup do
+      original_config = Application.get_env(:elixirgateway, :gateway)
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{
+          "secure.com" => "http://backend:8080",
+          "*.secure.com" => "http://backend:8080",
+          "open.com" => "http://backend:9090"
+        },
+        force_https: %{
+          "secure.com" => true,
+          "*.secure.com" => true,
+          "open.com" => false
+        }
+      )
+
+      on_exit(fn ->
+        if original_config do
+          Application.put_env(:elixirgateway, :gateway, original_config)
+        else
+          Application.delete_env(:elixirgateway, :gateway)
+        end
+      end)
+
+      :ok
+    end
+
+    test "sets force_https true for domains configured with ssl" do
+      conn =
+        conn(:get, "/")
+        |> Map.put(:host, "secure.com")
+        |> DomainRouter.call([])
+
+      assert conn.assigns[:force_https] == true
+    end
+
+    test "sets force_https true for wildcard domain match" do
+      conn =
+        conn(:get, "/")
+        |> Map.put(:host, "sub.secure.com")
+        |> DomainRouter.call([])
+
+      assert conn.assigns[:force_https] == true
+    end
+
+    test "sets force_https false for domains without ssl" do
+      conn =
+        conn(:get, "/")
+        |> Map.put(:host, "open.com")
+        |> DomainRouter.call([])
+
+      assert conn.assigns[:force_https] == false
+    end
+
+    test "sets force_https false when no force_https config present" do
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"noconfig.com" => "http://backend:8080"}
+      )
+
+      conn =
+        conn(:get, "/")
+        |> Map.put(:host, "noconfig.com")
+        |> DomainRouter.call([])
+
+      assert conn.assigns[:force_https] == false
     end
   end
 

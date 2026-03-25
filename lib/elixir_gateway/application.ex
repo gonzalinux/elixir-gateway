@@ -7,6 +7,8 @@ defmodule ElixirGateway.Application do
 
   @impl true
   def start(_type, _args) do
+    ElixirGateway.ConfigLoader.load()
+
     # Filter out notice level logs (typically OTP internals like syn)
     filter_fn = fn log_event, _extra ->
       case log_event do

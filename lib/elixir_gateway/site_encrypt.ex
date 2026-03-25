@@ -7,20 +7,14 @@ defmodule ElixirGateway.SiteEncrypt do
 
   # Private helper functions
   def get_domains do
-    case System.get_env("LETSENCRYPT_DOMAINS") do
-      nil ->
-        case Mix.env() do
-          # Provide dummy domain for tests
-          :test -> ["localhost"]
-          :dev -> ["dev.example.com"]
-          _ -> []
-        end
+    Application.get_env(:elixirgateway, :letsencrypt_domains) || default_domains()
+  end
 
-      domains_string ->
-        domains_string
-        |> String.split(",")
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
+  defp default_domains do
+    case Mix.env() do
+      :test -> ["localhost"]
+      :dev -> ["dev.example.com"]
+      _ -> []
     end
   end
 

@@ -34,13 +34,48 @@ SECRET_KEY_BASE="your-64-character-secret-key-here"
 
 ## SSL/TLS Configuration
 
+### GATEWAY_CONFIG_FILE
+**Type:** String (file path)
+**Required:** No
+**Default:** `priv/gateway.yaml`
+**Used in:** `lib/elixir_gateway/config_loader.ex`
+
+Path to a YAML configuration file that defines services, SSL, and DDNS settings. When this file exists it takes precedence over `GATEWAY_SERVICES` and `LETSENCRYPT_DOMAINS`. See `priv/gateway.yaml.example` for the full schema.
+
+```bash
+GATEWAY_CONFIG_FILE=/etc/elixir_gateway/gateway.yaml
+```
+
+The file supports `${VAR_NAME}` substitution for secrets:
+```yaml
+services:
+  myapp:
+    target: http://192.168.1.10:4000
+    domains:
+      - "*.myapp.com"
+      - myapp.com
+    ssl: true          # cert + force HTTPS redirect (default)
+    ddns:
+      provider: namecheap
+      record: "@"
+      domain: myapp.com
+      token: "${MYAPP_DDNS_TOKEN}"
+```
+
+To allow HTTP alongside HTTPS (cert without redirect):
+```yaml
+ssl:
+  enabled: true
+  force_https: false
+```
+
 ### LETSENCRYPT_DOMAINS
 **Type:** String (comma-separated)
 **Required:** No
 **Default:** Empty (SSL disabled)
-**Used in:** `lib/elixir_gateway/site_encrypt.ex:10`
+**Used in:** `lib/elixir_gateway/config_loader.ex`
 
-Comma-separated list of domains for Let's Encrypt SSL certificates.
+Comma-separated list of domains for Let's Encrypt SSL certificates. Only used when `GATEWAY_CONFIG_FILE` is not set. When using `gateway.yaml`, SSL domains are derived automatically from services with `ssl: true`.
 
 ```bash
 # Single domain
@@ -708,9 +743,9 @@ BOT_BLOCK_DURATION="300"
 **Type:** String (semicolon-separated mappings)
 **Required:** No
 **Default:** Uses services from config files
-**Used in:** `lib/elixir_gateway_web/plugs/domain_router.ex`
+**Used in:** `lib/elixir_gateway/config_loader.ex`
 
-Configure domain-to-backend routing mappings. When set, this **overrides** all services configured in `config/*.exs` files.
+Configure domain-to-backend routing mappings. Only used when `GATEWAY_CONFIG_FILE` is not set. Prefer `gateway.yaml` for new deployments as it also supports SSL and DDNS configuration per service. When set, this **overrides** all services configured in `config/*.exs` files.
 
 **Format:** `host=>target_url;host=>target_url;...`
 

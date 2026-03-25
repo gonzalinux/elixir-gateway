@@ -24,6 +24,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
         conn
         |> assign(:target_url, target_url)
         |> assign(:original_host, host)
+        |> assign(:force_https, force_https?(host))
     end
   end
 
@@ -39,6 +40,14 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
     Map.get(services, host) ||
       find_wildcard_match(services, host) ||
       if(host != "default", do: Map.get(services, "default_any"))
+  end
+
+  defp force_https?(host) do
+    force_https_map = Application.get_env(:elixirgateway, :gateway)[:force_https] || %{}
+
+    Map.get(force_https_map, host) ||
+      find_wildcard_match(force_https_map, host) ||
+      false
   end
 
   defp find_wildcard_match(services, host) do

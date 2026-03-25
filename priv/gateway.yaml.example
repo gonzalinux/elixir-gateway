@@ -1,0 +1,64 @@
+# gateway.yaml — service-oriented gateway configuration
+#
+# Set GATEWAY_CONFIG_FILE=/path/to/gateway.yaml to use this file.
+# Falls back to priv/gateway.yaml if not set.
+#
+# Secrets: use ${ENV_VAR_NAME} in any value and set the real value in .env.
+# The gateway will refuse to start if a referenced env var is not set.
+#
+# This file replaces GATEWAY_SERVICES, LETSENCRYPT_DOMAINS, and DDNS_DOMAINS
+# env vars. All other env vars (rate limits, cluster config, etc.) are unchanged.
+
+services:
+
+  seveneat:
+    target: http://192.168.2.160:8443
+    domains:
+      - "*.seveneat.com"
+      - seveneat.com
+    ssl: true
+    ddns:
+      provider: namecheap
+      record: "@"
+      domain: seveneat.com
+      token: "${SEVENEAT_DDNS_TOKEN}"
+
+  en2fe:
+    target: http://192.168.2.151:4000
+    domains:
+      - "*.en2fe.com"
+      - en2fe.com
+    ssl: true
+    ddns:
+      provider: namecheap
+      record: "@"
+      domain: en2fe.com
+      token: "${EN2FE_DDNS_TOKEN}"
+
+  # SSL only, no DDNS needed
+  gonzalo_blog:
+    target: http://192.168.2.151:4000
+    domains:
+      - blog.gonzalo-leon.site
+    ssl: true
+
+  # Wildcard cert via DNS-01 (Cloudflare), see GATEWAY_CONFIG_SSL_AND_CUSTOM_DOMAINS.md
+  # writeinone:
+  #   target: http://192.168.2.151:4000
+  #   domains:
+  #     - "*.writeinone.com"
+  #     - writeinone.com
+  #   ssl:
+  #     enabled: true
+  #     wildcard: true
+  #   ddns:
+  #     provider: cloudflare
+  #     zone_id: "${WRITEINONE_CF_ZONE_ID}"
+  #     token: "${CF_API_TOKEN}"
+
+  # Catch-all — no SSL needed here, matched domains handle their own certs
+  default:
+    target: http://192.168.2.151:4000
+    domains:
+      - default
+    ssl: false

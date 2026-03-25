@@ -10,3 +10,5 @@
 erl_crash.dump
 .env*
 !.env.template
+/priv/gateway.yaml
+gateway.yaml

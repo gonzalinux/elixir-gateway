@@ -50,6 +50,7 @@ defmodule ElixirGateway.MixProject do
       {:req, "~> 0.4"},
       {:quantum, "~> 3.5"},
       {:tidewave, "~> 0.1", only: :dev},
+      {:yaml_elixir, "~> 2.9"},
       {:bypass, "~> 2.1", only: :test},
       {:mock, "~> 0.3.0", only: :test},
       {:k6, "~> 0.2.1"}
