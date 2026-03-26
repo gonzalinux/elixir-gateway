@@ -444,9 +444,6 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
       key == host ->
         true
 
-      key in ["default_any", "default"] ->
-        true
-
       String.starts_with?(key, "*") ->
         suffix = String.slice(key, 1..-1//1)
         String.ends_with?(host, suffix)
