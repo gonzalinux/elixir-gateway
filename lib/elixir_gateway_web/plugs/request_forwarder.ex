@@ -401,8 +401,6 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   end
 
   defp emit_telemetry(conn, status, duration_native) do
-    duration_ms = System.convert_time_unit(duration_native, :native, :millisecond)
-
     # Sample 1 in 10 requests for path tracking to reduce cardinality
     metadata =
       if rem(System.unique_integer([:positive]), 10) == 0 do
@@ -428,7 +426,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
     :telemetry.execute(
       [:elixirgateway, :request, :complete],
-      %{duration: duration_ms},
+      %{duration: duration_native},
       metadata
     )
   end
