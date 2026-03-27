@@ -138,7 +138,12 @@ defmodule ElixirGateway.ConfigLoader do
     Application.put_env(:elixirgateway, :letsencrypt_domains, ssl_domains)
 
     existing = Application.get_env(:elixirgateway, :gateway, [])
-    Application.put_env(:elixirgateway, :gateway, Keyword.put(existing, :force_https, force_https_map))
+
+    Application.put_env(
+      :elixirgateway,
+      :gateway,
+      Keyword.put(existing, :force_https, force_https_map)
+    )
 
     Logger.debug("ConfigLoader: loaded #{length(ssl_domains)} SSL domains")
   end

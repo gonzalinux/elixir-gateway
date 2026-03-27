@@ -320,33 +320,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   end
 
   defp get_request_body(conn) do
-    content_type = get_content_type(conn)
-
-    cond do
-      # If body has already been parsed as JSON, re-encode it
-      String.starts_with?(content_type, "application/json") and conn.body_params != %{} ->
-        Jason.encode!(conn.body_params)
-
-      # If params were parsed from form data, encode as form
-      String.starts_with?(content_type, "application/x-www-form-urlencoded") and
-          conn.body_params != %{} ->
-        URI.encode_query(conn.body_params)
-
-      # For multipart data, check if it was parsed
-      String.starts_with?(content_type, "multipart/") and conn.params != %{} ->
-        read_raw_body(conn)
-
-      # For all other content types (including binary), use raw body
-      true ->
-        read_raw_body(conn)
-    end
-  end
-
-  defp get_content_type(conn) do
-    case get_req_header(conn, "content-type") do
-      [content_type | _] -> String.downcase(content_type)
-      [] -> ""
-    end
+    read_raw_body(conn)
   end
 
   defp read_raw_body(conn) do

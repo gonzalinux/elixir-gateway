@@ -24,7 +24,10 @@ defmodule ElixirGateway.ConfigLoaderTest do
 
   describe "load_from_env/0" do
     test "parses GATEWAY_SERVICES into services map" do
-      System.put_env("GATEWAY_SERVICES", "api.example.com=>http://localhost:8080;app.example.com=>http://localhost:3000")
+      System.put_env(
+        "GATEWAY_SERVICES",
+        "api.example.com=>http://localhost:8080;app.example.com=>http://localhost:3000"
+      )
 
       on_exit(fn -> System.delete_env("GATEWAY_SERVICES") end)
 
@@ -36,7 +39,10 @@ defmodule ElixirGateway.ConfigLoaderTest do
     end
 
     test "trims whitespace around => and ; in GATEWAY_SERVICES" do
-      System.put_env("GATEWAY_SERVICES", " api.example.com => http://localhost:8080 ; app.example.com => http://localhost:3000 ")
+      System.put_env(
+        "GATEWAY_SERVICES",
+        " api.example.com => http://localhost:8080 ; app.example.com => http://localhost:3000 "
+      )
 
       on_exit(fn -> System.delete_env("GATEWAY_SERVICES") end)
 
@@ -59,11 +65,16 @@ defmodule ElixirGateway.ConfigLoaderTest do
 
     test "does not touch services when GATEWAY_SERVICES is not set" do
       System.delete_env("GATEWAY_SERVICES")
-      Application.put_env(:elixirgateway, :gateway, services: %{"existing.com" => "http://existing"})
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"existing.com" => "http://existing"}
+      )
 
       ConfigLoader.load_from_env()
 
-      assert Application.get_env(:elixirgateway, :gateway)[:services] == %{"existing.com" => "http://existing"}
+      assert Application.get_env(:elixirgateway, :gateway)[:services] == %{
+               "existing.com" => "http://existing"
+             }
     end
 
     test "does not touch letsencrypt_domains when LETSENCRYPT_DOMAINS is not set" do
@@ -90,7 +101,9 @@ defmodule ElixirGateway.ConfigLoaderTest do
 
   describe "load/0 from YAML file" do
     setup do
-      path = Path.join(System.tmp_dir!(), "gateway_test_#{System.unique_integer([:positive])}.yaml")
+      path =
+        Path.join(System.tmp_dir!(), "gateway_test_#{System.unique_integer([:positive])}.yaml")
+
       System.put_env("GATEWAY_CONFIG_FILE", path)
 
       on_exit(fn ->

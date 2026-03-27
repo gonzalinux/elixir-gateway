@@ -91,10 +91,8 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       Enum.each(public_ips, fn ip ->
         conn = %{conn | remote_ip: ip}
         conn = MetricsAuthPlug.call(conn, [])
-        assert conn.status == 403
-        assert get_resp_header(conn, "content-type") == ["text/plain; charset=utf-8"]
-        assert conn.resp_body =~ "Forbidden: Metrics endpoint restricted to private networks"
-        assert conn.resp_body =~ :inet.ntoa(ip) |> to_string()
+        assert conn.halted
+        assert conn.status == 404
       end)
     end
 
@@ -104,7 +102,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
+      assert conn.status == 404
     end
 
     test "blocks 172.32.x.x (just after private range)", %{conn: conn} do
@@ -113,7 +111,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
+      assert conn.status == 404
     end
   end
 
@@ -165,8 +163,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
         conn = MetricsAuthPlug.call(conn, [])
 
         assert conn.halted
-        assert conn.status == 403
-        assert conn.resp_body =~ "Forbidden: Metrics endpoint restricted to private networks"
+        assert conn.status == 404
       end)
     end
   end
@@ -179,7 +176,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
+      assert conn.status == 404
     end
 
     test "handles missing remote_ip", %{conn: conn} do
@@ -188,18 +185,17 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
+      assert conn.status == 404
     end
 
-    test "response includes IP address in error message", %{conn: conn} do
-      test_ip = {8, 8, 8, 8}
-      conn = %{conn | remote_ip: test_ip}
+    test "returns empty body on IP denial", %{conn: conn} do
+      conn = %{conn | remote_ip: {8, 8, 8, 8}}
 
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
-      assert conn.resp_body =~ "8.8.8.8"
+      assert conn.status == 404
+      assert conn.resp_body == ""
     end
 
     test "plug can be called with options", %{conn: conn} do
@@ -235,7 +231,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
+      assert conn.status == 404
     end
 
     test "172.32.0.0 is excluded from private range", %{conn: conn} do
@@ -244,7 +240,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
       conn = MetricsAuthPlug.call(conn, [])
 
       assert conn.halted
-      assert conn.status == 403
+      assert conn.status == 404
     end
   end
 
@@ -353,7 +349,7 @@ defmodule ElixirGatewayWeb.Plugs.MetricsAuthPlugTest do
         |> MetricsAuthPlug.call([])
 
       assert conn_public.halted
-      assert conn_public.status == 403
+      assert conn_public.status == 404
     end
 
     test "token authentication takes precedence over IP validation", %{conn: conn} do

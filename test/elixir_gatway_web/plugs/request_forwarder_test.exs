@@ -53,14 +53,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
       end)
 
       conn =
-        conn
+        Plug.Test.conn(:post, "/api/users", Jason.encode!(expected_body))
         |> assign(:target_url, target_url)
         |> assign(:original_host, "api.example.com")
         |> put_req_header("content-type", "application/json")
-        |> Map.put(:request_path, "/api/users")
-        |> Map.put(:query_string, "")
-        |> Map.put(:method, "POST")
-        |> Map.put(:body_params, expected_body)
         |> RequestForwarder.call([])
 
       assert conn.status == 201
@@ -82,14 +78,14 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
       end)
 
       conn =
-        conn
+        Plug.Test.conn(
+          :put,
+          "/api/users/1",
+          URI.encode_query(%{"name" => "Jane", "email" => "jane@example.com"})
+        )
         |> assign(:target_url, target_url)
         |> assign(:original_host, "api.example.com")
         |> put_req_header("content-type", "application/x-www-form-urlencoded")
-        |> Map.put(:request_path, "/api/users/1")
-        |> Map.put(:query_string, "")
-        |> Map.put(:method, "PUT")
-        |> Map.put(:body_params, %{"name" => "Jane", "email" => "jane@example.com"})
         |> RequestForwarder.call([])
 
       assert conn.status == 200
