@@ -10,17 +10,25 @@ loki.source.file "gateway" {
 }
 
 loki.process "gateway" {
-  // Parse the JSON line — top-level and nested metadata fields
+  // Parse top-level fields and extract metadata object
   stage.json {
     expressions = {
-      level      = "level",
-      node       = "node",
-      timestamp  = "timestamp",
-      message    = "message",
-      request_id = "metadata.request_id",
-      module     = "metadata.module",
-      function   = "metadata.function",
-      line       = "metadata.line",
+      level     = "level",
+      node      = "node",
+      timestamp = "timestamp",
+      message   = "message",
+      metadata  = "metadata",
+    }
+  }
+
+  // Parse nested metadata fields from the extracted metadata object
+  stage.json {
+    source = "metadata"
+    expressions = {
+      request_id = "request_id",
+      module     = "module",
+      function   = "function",
+      line       = "line",
     }
   }
 
