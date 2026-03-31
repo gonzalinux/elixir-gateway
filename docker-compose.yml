@@ -36,7 +36,7 @@ services:
         max-file: "5"
 
   alloy:
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.15.0
     restart: unless-stopped
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
@@ -44,6 +44,7 @@ services:
     command: run /etc/alloy/config.alloy
     environment:
       - LOG_AGGREGATOR_URL=${LOG_AGGREGATOR_URL}
+      - DEPLOY_ENV=${DEPLOY_ENV}
 
 volumes:
   certs:

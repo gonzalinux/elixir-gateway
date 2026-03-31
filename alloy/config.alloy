@@ -28,6 +28,14 @@ loki.process "gateway" {
     }
   }
 
+  // Static label applied to all log lines
+  stage.static_labels {
+    values = {
+      app    = "elixir-gateway",
+      deploy = coalesce(env("DEPLOY_ENV"), "local"),
+    }
+  }
+
   // Use the log's own timestamp instead of ingestion time
   stage.timestamp {
     source = "timestamp"
@@ -44,6 +52,6 @@ loki.process "gateway" {
 
 loki.write "aggregator" {
   endpoint {
-    url = env("LOG_AGGREGATOR_URL")
+    url = coalesce(env("LOG_AGGREGATOR_URL"), "")
   }
 }

@@ -36,7 +36,7 @@ RUN apk add --no-cache openssl ncurses-libs ca-certificates bash curl libstdc++ 
 RUN addgroup -g 1000 gateway && \
     adduser -u 1000 -G gateway -s /bin/sh -D gateway
 
-RUN mkdir -p /app /etc/elixirgateway/certs && \
+RUN mkdir -p /app /app/logs /etc/elixirgateway/certs && \
     chown -R gateway:gateway /app /etc/elixirgateway
 
 COPY --from=builder --chown=gateway:gateway /app/_build/${MIX_ENV}/rel/elixirgateway /app

@@ -1,43 +1,30 @@
 defmodule ElixirGateway.JsonLogHandler do
   @moduledoc """
-  OTP :logger handler writing JSON log lines to a file for Grafana Alloy ingestion.
+  JSON formatter for Erlang's :logger_std_h handler.
+  Outputs one JSON line per log event for Grafana Alloy ingestion.
   Runs alongside the :console handler — stdout format is unchanged.
 
-  Enable by setting JSON_LOG_PATH to a path in the shared Docker volume, e.g.:
-      JSON_LOG_PATH=/app/logs/app.json.log
+  Enable via JSON_LOG_PATH env var pointing to the shared Docker volume path.
   """
 
   @handler_id :elixirgateway_json
 
   def attach(path, level \\ :info) do
     File.mkdir_p!(Path.dirname(path))
-    # Remove stale handler if present (e.g. after a hot reload)
     :logger.remove_handler(@handler_id)
 
-    :logger.add_handler(@handler_id, __MODULE__, %{
-      config: %{path: path},
+    :logger.add_handler(@handler_id, :logger_std_h, %{
       level: level,
-      filter_default: :log
+      config: %{type: {:file, String.to_charlist(path)}},
+      formatter: {__MODULE__, %{}}
     })
   end
 
   def detach, do: :logger.remove_handler(@handler_id)
 
-  # --- OTP :logger handler callbacks ---
+  # --- OTP :logger formatter callback ---
 
-  def adding_handler(%{config: %{path: path}} = config) do
-    case File.open(path, [:append, :utf8]) do
-      {:ok, device} -> {:ok, put_in(config, [:config, :device], device)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def removing_handler(%{config: %{device: device}}), do: File.close(device)
-  def removing_handler(_config), do: :ok
-
-  def changing_config(_action, _old, new_config), do: {:ok, new_config}
-
-  def log(%{level: level, msg: msg, meta: meta}, %{config: %{device: device}}) do
+  def format(%{level: level, msg: msg, meta: meta}, _config) do
     entry = %{
       timestamp: format_timestamp(meta[:time]),
       level: level,
@@ -47,11 +34,11 @@ defmodule ElixirGateway.JsonLogHandler do
     }
 
     case Jason.encode(entry) do
-      {:ok, json} -> IO.puts(device, json)
-      {:error, _} -> IO.puts(device, Jason.encode!(%{entry | message: inspect(msg), metadata: %{}}))
+      {:ok, json} -> [json, "\n"]
+      {:error, _} -> [Jason.encode!(%{entry | message: inspect(msg), metadata: %{}}), "\n"]
     end
   rescue
-    _ -> :ok
+    _ -> ""
   end
 
   # --- Private ---
