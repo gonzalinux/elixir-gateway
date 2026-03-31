@@ -10,17 +10,21 @@ loki.source.file "gateway" {
 }
 
 loki.process "gateway" {
-  // Parse the JSON line
+  // Parse the JSON line — top-level and nested metadata fields
   stage.json {
     expressions = {
-      level     = "level",
-      node      = "node",
-      timestamp = "timestamp",
-      message   = "message",
+      level      = "level",
+      node       = "node",
+      timestamp  = "timestamp",
+      message    = "message",
+      request_id = "metadata.request_id",
+      module     = "metadata.module",
+      function   = "metadata.function",
+      line       = "metadata.line",
     }
   }
 
-  // Promote level and node to stream labels
+  // Promote level and node as indexed stream labels
   stage.labels {
     values = {
       level = null,
@@ -28,11 +32,21 @@ loki.process "gateway" {
     }
   }
 
-  // Static label applied to all log lines
+  // Static labels applied to all log lines
   stage.static_labels {
     values = {
       app    = "elixir-gateway",
       deploy = coalesce(env("DEPLOY_ENV"), "local"),
+    }
+  }
+
+  // Attach high-cardinality fields as structured metadata (queryable but not indexed)
+  stage.structured_metadata {
+    values = {
+      request_id = "",
+      module     = "",
+      function   = "",
+      line       = "",
     }
   }
 
@@ -42,7 +56,7 @@ loki.process "gateway" {
     format = "RFC3339"
   }
 
-  // Use message as the log line
+  // Use message as the log line (_msg)
   stage.output {
     source = "message"
   }
