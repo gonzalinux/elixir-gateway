@@ -129,6 +129,11 @@ export MIN_REQ_THRESHOLD=20
   - Token authentication (if `METRICS_AUTH_TOKEN` env var is set)
   - IP-based authentication (fallback, allows private networks only)
 - **`/dev/dashboard`** Phoenix LiveDashboard (dev only)
+- **Structured JSON logging** via `ElixirGateway.JsonLogHandler` for Grafana Alloy ingestion
+  - Runs as a second OTP logger handler — stdout console format is unchanged
+  - Each line is a JSON object: `timestamp`, `level`, `message`, `node`, `metadata`
+  - Enable by setting `JSON_LOG_PATH` to a path in the shared Docker volume
+  - Alloy config in `alloy/config.alloy` tails the file and forwards to a Loki-compatible aggregator
 
 ### Configuration Structure
 

@@ -26,6 +26,12 @@ defmodule ElixirGateway.Application do
     :logger.add_primary_filter(:filter_notice_logs, {filter_fn, []})
     :logger.add_handler_filter(:default, :filter_notice_logs, {filter_fn, []})
 
+    # Attach JSON log handler if a path is configured (for Grafana Alloy ingestion)
+    case Application.get_env(:elixirgateway, :json_logging) do
+      [enabled: true, path: path] -> ElixirGateway.JsonLogHandler.attach(path)
+      _ -> :ok
+    end
+
     # Optionally include cluster supervisor (excluded in test mode where tests manage it manually)
     cluster_supervisor =
       if Application.get_env(:elixirgateway, :start_cluster_supervisor, true) do

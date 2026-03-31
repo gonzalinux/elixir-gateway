@@ -67,6 +67,12 @@ if System.get_env("BOT_BLOCKER_ENABLED") do
     max_404s_before_block: 10
 end
 
+# JSON structured logging for Grafana Alloy ingestion
+# Set JSON_LOG_PATH to a path in the shared Docker volume to enable
+if path = System.get_env("JSON_LOG_PATH") do
+  config :elixirgateway, :json_logging, enabled: true, path: path
+end
+
 # Gateway services and SSL domains are now loaded by ElixirGateway.ConfigLoader
 # at application startup, either from gateway.yaml or from GATEWAY_SERVICES /
 # LETSENCRYPT_DOMAINS env vars. No parsing needed here.

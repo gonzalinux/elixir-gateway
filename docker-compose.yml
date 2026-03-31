@@ -12,9 +12,11 @@ services:
       - .env
     environment:
       - SITE_ENCRYPT_DB=/etc/elixirgateway/certs
+      - JSON_LOG_PATH=/app/logs/app.json.log
     network_mode: host
     volumes:
       - certs:/etc/elixirgateway/certs
+      - logs:/app/logs
     restart: unless-stopped
     stop_grace_period: 60s
     healthcheck:
@@ -33,6 +35,18 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  alloy:
+    image: grafana/alloy:latest
+    restart: unless-stopped
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - logs:/app/logs:ro
+    command: run /etc/alloy/config.alloy
+    environment:
+      - LOG_AGGREGATOR_URL=${LOG_AGGREGATOR_URL}
+
 volumes:
   certs:
+    driver: local
+  logs:
     driver: local

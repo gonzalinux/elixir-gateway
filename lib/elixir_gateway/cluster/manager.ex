@@ -197,6 +197,8 @@ defmodule ElixirGateway.Cluster.Manager do
         updated_health
       end
 
+    notify_peer_to_reclaim_dns(peer_node)
+
     {:noreply, %{state | peer_health: final_health}}
   end
 
@@ -394,6 +396,25 @@ defmodule ElixirGateway.Cluster.Manager do
         Logger.error("Invalid peer address format: #{peer_address} (expected node@host:port)")
         {:error, :invalid_format}
     end
+  end
+
+  defp notify_peer_to_reclaim_dns(peer_node) do
+    Task.start(fn ->
+      case :rpc.call(peer_node, ElixirGateway.Cluster.DNSFailover, :trigger_failover, [], 30_000) do
+        {:ok, ip} ->
+          Logger.info("Peer #{peer_node} reclaimed DNS (IP: #{ip})")
+
+        {:error, reason} ->
+          Logger.warning("Peer #{peer_node} DNS reclaim failed: #{inspect(reason)}")
+
+        {:badrpc, {:EXIT, {:noproc, _}}} ->
+          # Peer doesn't have DNS failover configured, nothing to do
+          :ok
+
+        {:badrpc, reason} ->
+          Logger.debug("Could not trigger DNS reclaim on #{peer_node}: #{inspect(reason)}")
+      end
+    end)
   end
 
   defp schedule_reconnect(peer_node) do
