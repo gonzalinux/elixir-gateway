@@ -29,13 +29,13 @@ defmodule ElixirGateway.JsonLogHandler do
       timestamp: format_timestamp(meta[:time]),
       level: level,
       message: format_message(msg),
-      node: node(),
-      metadata: extract_metadata(meta)
+      node: node()
     }
+    |> Map.merge(extract_metadata(meta))
 
     case Jason.encode(entry) do
       {:ok, json} -> [json, "\n"]
-      {:error, _} -> [Jason.encode!(%{entry | message: inspect(msg), metadata: %{}}), "\n"]
+      {:error, _} -> [Jason.encode!(%{entry | message: inspect(msg)}), "\n"]
     end
   rescue
     _ -> ""
