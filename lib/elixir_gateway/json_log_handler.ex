@@ -25,13 +25,14 @@ defmodule ElixirGateway.JsonLogHandler do
   # --- OTP :logger formatter callback ---
 
   def format(%{level: level, msg: msg, meta: meta}, _config) do
-    entry = %{
-      timestamp: format_timestamp(meta[:time]),
-      level: level,
-      message: format_message(msg),
-      node: node()
-    }
-    |> Map.merge(extract_metadata(meta))
+    entry =
+      %{
+        timestamp: format_timestamp(meta[:time]),
+        level: level,
+        message: format_message(msg),
+        node: node()
+      }
+      |> Map.merge(extract_metadata(meta))
 
     case Jason.encode(entry) do
       {:ok, json} -> [json, "\n"]
