@@ -10,25 +10,12 @@ loki.source.file "gateway" {
 }
 
 loki.process "gateway" {
-  // Parse top-level fields and extract metadata object
+  // Extract stream labels and timestamp from the JSON line
   stage.json {
     expressions = {
       level     = "level",
       node      = "node",
       timestamp = "timestamp",
-      message   = "message",
-      metadata  = "metadata",
-    }
-  }
-
-  // Parse nested metadata fields from the extracted metadata object
-  stage.json {
-    source = "metadata"
-    expressions = {
-      request_id = "request_id",
-      module     = "module",
-      function   = "function",
-      line       = "line",
     }
   }
 
@@ -48,26 +35,13 @@ loki.process "gateway" {
     }
   }
 
-  // Attach high-cardinality fields as structured metadata (queryable but not indexed)
-  stage.structured_metadata {
-    values = {
-      request_id = "",
-      module     = "",
-      function   = "",
-      line       = "",
-    }
-  }
-
   // Use the log's own timestamp instead of ingestion time
   stage.timestamp {
     source = "timestamp"
     format = "RFC3339"
   }
 
-  // Use message as the log line (_msg)
-  stage.output {
-    source = "message"
-  }
+  // _msg is the full JSON — query fields with | json in VictoriaLogs
 
   forward_to = [loki.write.aggregator.receiver]
 }
