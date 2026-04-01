@@ -290,7 +290,12 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       end)
 
     original_host = conn.assigns[:original_host] || conn.host
-    [{"host", original_host} | filtered]
+    headers = [{"host", original_host} | filtered]
+
+    case Logger.metadata()[:request_id] do
+      nil -> headers
+      request_id -> [{"x-request-id", request_id} | headers]
+    end
   end
 
   defp put_response_headers(conn, headers) do
