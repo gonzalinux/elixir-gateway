@@ -16,6 +16,7 @@ defmodule ElixirGatewayWeb.Router do
   end
 
   pipeline :admin_auth do
+    plug(:accepts, ["html", "json"])
     plug(ElixirGatewayWeb.Plugs.MetricsAuthPlug)
   end
 
