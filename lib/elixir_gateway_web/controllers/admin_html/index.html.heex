@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cluster Admin — ElixirGateway</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 2rem;
+      min-height: 100vh;
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 600; color: #f1f5f9; margin-bottom: 0.25rem; }
+
+    h2 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 1rem;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    .node-label { font-size: 0.8rem; color: #475569; margin-top: 0.3rem; font-family: monospace; }
+
+    .refresh-info { font-size: 0.75rem; color: #475569; text-align: right; line-height: 1.6; }
+    .refresh-info b { color: #94a3b8; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .full-width { grid-column: 1 / -1; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.2rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .badge-green  { background: #14532d; color: #86efac; }
+    .badge-yellow { background: #713f12; color: #fde68a; }
+    .badge-red    { background: #7f1d1d; color: #fca5a5; }
+    .badge-gray   { background: #0f172a; color: #475569; border: 1px solid #334155; }
+    .badge-blue   { background: #1e3a5f; color: #93c5fd; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th {
+      text-align: left;
+      color: #64748b;
+      font-weight: 500;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid #334155;
+    }
+    td {
+      padding: 0.55rem 0.5rem;
+      border-bottom: 1px solid #1e293b;
+      font-family: monospace;
+      font-size: 0.78rem;
+      color: #cbd5e1;
+    }
+    tr:last-child td { border-bottom: none; }
+
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      padding: 0.45rem 0;
+      border-bottom: 1px solid #1e293b;
+      font-size: 0.85rem;
+    }
+    .kv:last-child { border-bottom: none; }
+    .kv-label { color: #64748b; white-space: nowrap; }
+    .kv-value { font-family: monospace; font-size: 0.78rem; color: #cbd5e1; text-align: right; word-break: break-all; }
+
+    .empty { color: #475569; font-size: 0.85rem; text-align: center; padding: 1.25rem 0; }
+
+    .actions { margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+
+    .btn {
+      padding: 0.55rem 1.1rem;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.82; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-danger    { background: #dc2626; color: #fff; }
+    .btn-secondary { background: #334155; color: #e2e8f0; }
+
+    .result {
+      margin-top: 1rem;
+      padding: 0.7rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.82rem;
+      font-family: monospace;
+      display: none;
+    }
+    .result-ok    { background: #14532d; color: #86efac; border: 1px solid #166534; display: block; }
+    .result-error { background: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Cluster Admin</h1>
+      <div class="node-label" id="node-label">loading…</div>
+    </div>
+    <div class="refresh-info">
+      Refreshes in <b id="countdown">10</b>s &nbsp;·&nbsp; <b id="last-updated">—</b>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <!-- Cluster -->
+    <div class="card full-width">
+      <div class="card-header">
+        <h2>Cluster</h2>
+        <span id="cluster-badge" class="badge badge-gray">—</span>
+      </div>
+      <div id="cluster-body"><p class="empty">Loading…</p></div>
+    </div>
+
+    <!-- DNS Failover -->
+    <div class="card">
+      <div class="card-header">
+        <h2>DNS Failover</h2>
+        <span id="dns-badge" class="badge badge-gray">—</span>
+      </div>
+      <div id="dns-body"><p class="empty">Loading…</p></div>
+      <div class="actions" id="dns-actions" style="display:none">
+        <button class="btn btn-danger" id="failover-btn" onclick="triggerFailover()">
+          Trigger DNS Failover
+        </button>
+        <button class="btn btn-secondary" onclick="refreshNow()">Refresh now</button>
+      </div>
+      <div id="failover-result" class="result"></div>
+    </div>
+
+    <!-- Load Distribution -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Load Distribution</h2>
+        <span id="ld-badge" class="badge badge-gray">—</span>
+      </div>
+      <div id="ld-body"><p class="empty">Loading…</p></div>
+    </div>
+
+  </div>
+
+  <script>
+    let countdown = 10;
+
+    // ── Badge helpers ────────────────────────────────────────────────────────
+
+    function mkBadge(text, color) {
+      const map = { green: 'badge-green', yellow: 'badge-yellow', red: 'badge-red', gray: 'badge-gray', blue: 'badge-blue' };
+      return `<span class="badge ${map[color] || 'badge-gray'}">${text}</span>`;
+    }
+
+    function peerColor(s) {
+      return s === 'healthy' ? 'green' : s === 'disconnected' ? 'red' : 'yellow';
+    }
+
+    function stateColor(s) {
+      if (s === 'healthy') return 'green';
+      if (s === 'failed')  return 'red';
+      if (s === 'failing' || s === 'unknown') return 'yellow';
+      return 'gray';
+    }
+
+    function setBadge(id, text, color) {
+      const el = document.getElementById(id);
+      el.className = `badge badge-${color}`;
+      el.textContent = text;
+    }
+
+    // ── Render sections ──────────────────────────────────────────────────────
+
+    function renderCluster(c) {
+      if (!c.enabled) {
+        setBadge('cluster-badge', 'disabled', 'gray');
+        document.getElementById('cluster-body').innerHTML = '<p class="empty">Clustering not configured on this node.</p>';
+        return;
+      }
+      setBadge('cluster-badge', c.healthy ? 'healthy' : 'unhealthy', c.healthy ? 'green' : 'red');
+
+      const peers = Object.entries(c.peer_health || {});
+      if (peers.length === 0) {
+        document.getElementById('cluster-body').innerHTML = '<p class="empty">No peers configured.</p>';
+        return;
+      }
+      const rows = peers.map(([name, status]) =>
+        `<tr><td>${name}</td><td>${mkBadge(status, peerColor(status))}</td></tr>`
+      ).join('');
+      document.getElementById('cluster-body').innerHTML =
+        `<table><thead><tr><th>Peer</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function renderDns(d) {
+      if (!d.enabled) {
+        setBadge('dns-badge', 'disabled', 'gray');
+        document.getElementById('dns-body').innerHTML = '<p class="empty">DNS failover not configured on this node.</p>';
+        document.getElementById('dns-actions').style.display = 'none';
+        return;
+      }
+      const color = stateColor(d.last_state);
+      setBadge('dns-badge', d.last_state, color);
+      document.getElementById('dns-actions').style.display = 'flex';
+
+      const kvs = [
+        ['State',     mkBadge(d.last_state, color)],
+        ['Pending',   mkBadge(d.pending_failover ? 'yes' : 'no', d.pending_failover ? 'yellow' : 'gray')],
+        ['Provider',  d.provider  || '—'],
+        ['Domains',   (d.domains  || []).join(', ') || '—'],
+        ['Cached IP', d.cached_ip || '—'],
+      ];
+      document.getElementById('dns-body').innerHTML =
+        kvs.map(([k, v]) =>
+          `<div class="kv"><span class="kv-label">${k}</span><span class="kv-value">${v}</span></div>`
+        ).join('');
+    }
+
+    function renderLd(ld) {
+      if (!ld.enabled) {
+        setBadge('ld-badge', 'disabled', 'gray');
+        document.getElementById('ld-body').innerHTML = '<p class="empty">Load distribution not enabled.</p>';
+        return;
+      }
+      const color = ld.below_threshold ? 'blue' : 'green';
+      setBadge('ld-badge', ld.below_threshold ? 'below threshold' : 'distributing', color);
+
+      const nodes = Object.entries(ld.nodes || {});
+      const total = ld.total_weight || 0;
+      const rows = nodes.map(([name, info]) => {
+        const pct = total > 0 ? (info.weight / total * 100).toFixed(1) : '0.0';
+        return `<tr><td>${name}</td><td style="text-align:right">${info.weight}</td><td style="text-align:right">${pct}%</td></tr>`;
+      }).join('');
+      document.getElementById('ld-body').innerHTML =
+        `<table><thead><tr><th>Node</th><th style="text-align:right">Weight</th><th style="text-align:right">Share</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // ── Data fetching ────────────────────────────────────────────────────────
+
+    async function fetchStatus() {
+      try {
+        const r = await fetch('/admin/cluster/status');
+        const d = await r.json();
+        document.getElementById('node-label').textContent = d.node;
+        document.getElementById('last-updated').textContent =
+          'updated ' + new Date(d.timestamp).toLocaleTimeString();
+        renderCluster(d.cluster);
+        renderDns(d.dns_failover);
+        renderLd(d.load_distribution);
+      } catch (_) {
+        document.getElementById('last-updated').textContent = 'fetch failed';
+      }
+    }
+
+    async function triggerFailover() {
+      if (!confirm('Trigger a manual DNS failover to this node\'s public IP?\n\nThis will update the DNS records immediately.')) return;
+
+      const btn = document.getElementById('failover-btn');
+      const result = document.getElementById('failover-result');
+      btn.disabled = true;
+      btn.textContent = 'Triggering…';
+      result.className = 'result';
+
+      try {
+        const r = await fetch('/admin/cluster/failover', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' }
+        });
+        const d = await r.json();
+        if (d.ok) {
+          result.className = 'result result-ok';
+          result.textContent = '✓ DNS updated to ' + d.ip;
+        } else {
+          result.className = 'result result-error';
+          result.textContent = '✗ ' + d.error;
+        }
+      } catch (e) {
+        result.className = 'result result-error';
+        result.textContent = '✗ Request failed: ' + e.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Trigger DNS Failover';
+        fetchStatus();
+      }
+    }
+
+    function refreshNow() {
+      countdown = 10;
+      document.getElementById('countdown').textContent = countdown;
+      fetchStatus();
+    }
+
+    // ── Timer ────────────────────────────────────────────────────────────────
+
+    fetchStatus();
+    setInterval(() => {
+      countdown--;
+      document.getElementById('countdown').textContent = countdown;
+      if (countdown <= 0) {
+        countdown = 10;
+        fetchStatus();
+      }
+    }, 1000);
+  </script>
+</body>
+</html>

@@ -15,6 +15,10 @@ defmodule ElixirGatewayWeb.Router do
     plug(ElixirGatewayWeb.Plugs.MetricsAuthPlug)
   end
 
+  pipeline :admin_auth do
+    plug(ElixirGatewayWeb.Plugs.MetricsAuthPlug)
+  end
+
   # Health check endpoints (must come before rate limiting)
   scope "/health", ElixirGatewayWeb do
     get("/", HealthController, :check)
@@ -31,6 +35,14 @@ defmodule ElixirGatewayWeb.Router do
   scope "/" do
     pipe_through(:metrics_auth)
     forward("/metrics", PromEx.Plug, prom_ex_module: ElixirGateway.PromEx)
+  end
+
+  # Cluster admin UI (private network only)
+  scope "/admin", ElixirGatewayWeb do
+    pipe_through(:admin_auth)
+    get("/cluster", AdminController, :index)
+    get("/cluster/status", AdminController, :status)
+    post("/cluster/failover", AdminController, :trigger_failover)
   end
 
   # Enable LiveDashboard in development (must come before catch-all)
