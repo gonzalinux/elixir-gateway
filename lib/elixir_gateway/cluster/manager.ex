@@ -175,12 +175,18 @@ defmodule ElixirGateway.Cluster.Manager do
     # Peer connected - update health state immediately
     peer_str = Atom.to_string(peer_node)
 
-    # Find the peer in health map and mark as healthy
-    # If not found (e.g., primary node with empty peers list), add it dynamically
+    # Find the peer in health map by transforming the configured address and comparing
+    # (configured key is "name@host:port", connecting node is "name_port@host")
     {found, updated_health} =
       Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, _status},
                                                                     {found_acc, acc} ->
-        if String.contains?(peer_key, peer_str) do
+        matches =
+          case transform_peer_address(peer_key) do
+            {:ok, ^peer_node} -> true
+            _ -> false
+          end
+
+        if matches do
           Logger.info("Peer connected: #{peer_key}  #{extra}")
           {true, Map.put(acc, peer_key, :healthy)}
         else
@@ -207,11 +213,17 @@ defmodule ElixirGateway.Cluster.Manager do
     # Peer disconnected - update health state immediately
     peer_str = Atom.to_string(peer_node)
 
-    # Find the peer in health map and mark as disconnected (including dynamically added peers)
+    # Find the peer in health map by transforming the configured address and comparing
     {found, updated_health} =
       Enum.reduce(state.peer_health, {false, state.peer_health}, fn {peer_key, status},
                                                                     {found_acc, acc} ->
-        if String.contains?(peer_key, peer_str) and status == :healthy do
+        matches =
+          case transform_peer_address(peer_key) do
+            {:ok, ^peer_node} -> true
+            _ -> peer_key == peer_str
+          end
+
+        if matches and status == :healthy do
           Logger.warning("Peer disconnected: #{peer_key}  #{extra}")
           {true, Map.put(acc, peer_key, :disconnected)}
         else

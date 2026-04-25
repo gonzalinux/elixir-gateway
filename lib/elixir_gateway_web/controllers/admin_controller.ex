@@ -72,11 +72,17 @@ defmodule ElixirGatewayWeb.AdminController do
             nil -> nil
           end
 
+        domains =
+          Enum.map(s.domains, fn d ->
+            label = if d.host == "@", do: d.domain, else: "#{d.host}.#{d.domain}"
+            label
+          end)
+
         %{
           enabled: true,
           last_state: to_string(s.last_state),
           pending_failover: s.pending_failover,
-          domains: s.domains,
+          domains: domains,
           provider: to_string(s.provider),
           cached_ip: cached_ip
         }
