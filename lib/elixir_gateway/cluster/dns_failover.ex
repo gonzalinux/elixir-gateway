@@ -153,23 +153,27 @@ defmodule ElixirGateway.Cluster.DNSFailover do
 
   @impl true
   def handle_call(:trigger_failover, _from, state) do
-    Logger.warning("Manual DNS failover triggered")
+    if not is_primary?() do
+      Logger.debug("DNS failover trigger ignored — secondary node")
+      {:reply, {:ok, :not_primary}, state}
+    else
+      Logger.warning("Manual DNS failover triggered")
 
-    # Cancel any pending automatic failover
-    if state.pending_failover_ref do
-      Process.cancel_timer(state.pending_failover_ref)
+      if state.pending_failover_ref do
+        Process.cancel_timer(state.pending_failover_ref)
+      end
+
+      {result, updated_state} = perform_dns_update(state)
+
+      new_state = %{
+        updated_state
+        | last_state: :failed,
+          failover_triggered_at: System.monotonic_time(:millisecond),
+          pending_failover_ref: nil
+      }
+
+      {:reply, result, new_state}
     end
-
-    {result, updated_state} = perform_dns_update(state)
-
-    new_state = %{
-      updated_state
-      | last_state: :failed,
-        failover_triggered_at: System.monotonic_time(:millisecond),
-        pending_failover_ref: nil
-    }
-
-    {:reply, result, new_state}
   end
 
   @impl true
