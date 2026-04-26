@@ -19,7 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `make install-certbot` - Install certbot for Let's Encrypt SSL certificates
 
 ### Formatting and Code Quality
-- `mix format` - Format Elixir code (standard Elixir formatter)
+- `mix format` - Format Elixir code (standard Elixir formatter) 
+- WE USE 2 SPACES tabulations
 
 ## Architecture Overview
 

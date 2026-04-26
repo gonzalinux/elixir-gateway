@@ -413,7 +413,10 @@ defmodule ElixirGateway.Cluster.Manager do
 
   @impl ElixirGateway.Cluster.RPC
   def handle_rpc({:trigger_failover}) do
-    ElixirGateway.Cluster.DNSFailover.trigger_failover()
+    case ElixirGateway.Cluster.DNSFailover.is_primary?() do
+      true -> ElixirGateway.Cluster.DNSFailover.trigger_failover()
+      false -> {:ok, :not_primary}
+    end
   end
 
   defp notify_peer_to_reclaim_dns(peer_node) do
