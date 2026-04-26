@@ -493,10 +493,11 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     # data at startup rather than a file path reference.
     endpoint = ElixirGatewayWeb.Endpoint
 
+    children = Supervisor.which_children(endpoint)
+    Logger.info("Endpoint supervisor children: #{inspect(Enum.map(children, fn {id, _pid, type, mods} -> {id, type, mods} end))}")
+
     https_child =
-      endpoint
-      |> Supervisor.which_children()
-      |> Enum.find(fn {id, _pid, _type, _mods} ->
+      Enum.find(children, fn {id, _pid, _type, _mods} ->
         case id do
           {Bandit, :https} -> true
           {Bandit, ^endpoint, :https} -> true
