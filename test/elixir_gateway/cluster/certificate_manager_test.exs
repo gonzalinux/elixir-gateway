@@ -132,7 +132,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         generated_at: DateTime.utc_now()
       }
 
-      result = CertificateManager.receive_certificates(invalid_bundle)
+      result = CertificateManager.handle_rpc({:sync_certificates, invalid_bundle})
       assert {:error, :checksum_mismatch} = result
 
       GenServer.stop(pid)
@@ -167,7 +167,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         generated_at: DateTime.utc_now()
       }
 
-      result = CertificateManager.receive_certificates(valid_bundle)
+      result = CertificateManager.handle_rpc({:sync_certificates, valid_bundle})
       assert :ok = result
 
       # Verify files were written
@@ -207,7 +207,7 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
         generated_at: DateTime.utc_now()
       }
 
-      result = CertificateManager.receive_certificates(cert_bundle)
+      result = CertificateManager.handle_rpc({:sync_certificates, cert_bundle})
       assert {:error, :primary_cannot_receive} = result
 
       GenServer.stop(pid)

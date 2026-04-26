@@ -28,10 +28,9 @@ defmodule ElixirGatewayWeb.AdminController do
       if is_nil(target_str) or target_str == local do
         handle_rpc({:trigger_failover})
       else
-        try do
-          rpc_call(String.to_existing_atom(target_str), {:trigger_failover})
-        rescue
-          ArgumentError -> {:error, "Unknown node: #{target_str}"}
+        case ElixirGateway.Cluster.Manager.transform_peer_address(target_str) do
+          {:ok, target_node} -> rpc_call(target_node, {:trigger_failover})
+          {:error, _} -> {:error, "Invalid node format: #{target_str}"}
         end
       end
 
