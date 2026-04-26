@@ -51,6 +51,7 @@ defmodule ElixirGateway.Cluster.Manager do
   alias ElixirGateway.Cluster.IPDetection
 
   use GenServer
+  use ElixirGateway.Cluster.RPC
   require Logger
 
   @default_heartbeat_interval 1_000
@@ -410,20 +411,22 @@ defmodule ElixirGateway.Cluster.Manager do
     end
   end
 
+  @impl ElixirGateway.Cluster.RPC
+  def handle_rpc({:trigger_failover}) do
+    ElixirGateway.Cluster.DNSFailover.trigger_failover()
+  end
+
   defp notify_peer_to_reclaim_dns(peer_node) do
     Task.start(fn ->
-      case :rpc.call(peer_node, ElixirGateway.Cluster.DNSFailover, :trigger_failover, [], 30_000) do
+      case rpc_call(peer_node, {:trigger_failover}) do
         {:ok, ip} ->
           Logger.info("Peer #{peer_node} reclaimed DNS (IP: #{ip})")
 
-        {:error, reason} ->
-          Logger.warning("Peer #{peer_node} DNS reclaim failed: #{inspect(reason)}")
-
-        {:badrpc, {:EXIT, {:noproc, _}}} ->
+        {:error, {:EXIT, {:noproc, _}}} ->
           # Peer doesn't have DNS failover configured, nothing to do
           :ok
 
-        {:badrpc, reason} ->
+        {:error, reason} ->
           Logger.debug("Could not trigger DNS reclaim on #{peer_node}: #{inspect(reason)}")
       end
     end)

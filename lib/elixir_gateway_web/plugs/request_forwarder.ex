@@ -2,7 +2,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   @moduledoc """
   Forwards HTTP requests to target services using Finch for high performance.
   """
-
+  use ElixirGateway.Cluster.RPC
   import Plug.Conn
   require Logger
 
@@ -74,7 +74,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     }
 
     # Forward via RPC with 45s timeout (allows for 40s backend timeout)
-    case :rpc.call(node, __MODULE__, :execute_forwarded_request, [request_data], 45_000) do
+    case rpc_call(node, {:execute_forwarded_request, request_data}, 45_000) do
       {:ok, status, headers, body} ->
         # Record successful forwarded request
         if Config.load_distribution_enabled?() do
@@ -94,6 +94,21 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         |> send_resp(status, body)
         |> halt()
 
+      {:error, :node_down} ->
+        duration = System.monotonic_time() - start_time
+        duration_ms = System.convert_time_unit(duration, :native, :millisecond)
+        emit_rpc_telemetry(node, :nodedown, duration)
+
+        Logger.warning(
+          "Load distributor: Remote node down (#{node}), falling back to local processing (attempt took #{duration_ms}ms)"
+        )
+
+        if Config.load_distribution_enabled?() do
+          ElixirGateway.Cluster.LoadDistributor.record_request(node())
+        end
+
+        process_locally(conn, [])
+
       {:error, reason} ->
         duration = System.monotonic_time() - start_time
         emit_rpc_telemetry(node, :error, duration)
@@ -104,37 +119,10 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         |> put_resp_content_type("application/json")
         |> send_resp(502, Jason.encode!(%{error: "Service unavailable"}))
         |> halt()
-
-      {:badrpc, :nodedown} ->
-        # Remote node is down - fallback to local processing
-        duration = System.monotonic_time() - start_time
-        duration_ms = System.convert_time_unit(duration, :native, :millisecond)
-        emit_rpc_telemetry(node, :nodedown, duration)
-
-        Logger.warning(
-          "Load distributor: Remote node down (#{node}), falling back to local processing (attempt took #{duration_ms}ms)"
-        )
-
-        # Record local request since we're falling back
-        if Config.load_distribution_enabled?() do
-          ElixirGateway.Cluster.LoadDistributor.record_request(node())
-        end
-
-        process_locally(conn, [])
-
-      {:badrpc, reason} ->
-        duration = System.monotonic_time() - start_time
-        emit_rpc_telemetry(node, :badrpc, duration)
-
-        Logger.error("RPC call failed with badrpc: #{inspect(reason)}")
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(503, Jason.encode!(%{error: "Service temporarily unavailable"}))
-        |> halt()
     end
   end
 
+  @impl true
   @doc """
   Executes a forwarded request on the remote node.
 
@@ -146,7 +134,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   - `{:ok, status, headers, body}` on success
   - `{:error, reason}` on failure
   """
-  def execute_forwarded_request(request_data) do
+  def handle_rpc({:execute_forwarded_request, request_data}) do
     Logger.info("Executing RPC forwarded request: #{request_data.method} #{request_data.path}")
 
     try do

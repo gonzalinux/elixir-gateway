@@ -227,15 +227,21 @@
       setBadge('cluster-badge', c.healthy ? 'healthy' : 'unhealthy', c.healthy ? 'green' : 'red');
 
       const peers = Object.entries(c.peer_health || {});
-      if (peers.length === 0) {
-        document.getElementById('cluster-body').innerHTML = '<p class="empty">No peers configured.</p>';
-        return;
-      }
-      const rows = peers.map(([name, status]) =>
-        `<tr><td>${name}</td><td>${mkBadge(status, peerColor(status))}</td></tr>`
-      ).join('');
+      const localRow = `<tr>
+        <td>${c.local_node} <span style="color:#475569;font-size:0.7rem">(this node)</span></td>
+        <td>${mkBadge('local', 'blue')}</td>
+        <td><button class="btn btn-danger" style="padding:0.25rem 0.6rem;font-size:0.75rem" onclick="triggerFailoverOn(null)">Failover</button></td>
+      </tr>`;
+      const peerRows = peers.map(([name, status]) => {
+        const connected = c.connected_peers.includes(name) || status === 'healthy';
+        const btn = connected
+          ? `<button class="btn btn-danger" style="padding:0.25rem 0.6rem;font-size:0.75rem" onclick="triggerFailoverOn('${name}')">Failover</button>`
+          : `<button class="btn btn-secondary" style="padding:0.25rem 0.6rem;font-size:0.75rem" disabled>Failover</button>`;
+        return `<tr><td>${name}</td><td>${mkBadge(status, peerColor(status))}</td><td>${btn}</td></tr>`;
+      }).join('');
       document.getElementById('cluster-body').innerHTML =
-        `<table><thead><tr><th>Peer</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+        `<table><thead><tr><th>Node</th><th>Status</th><th>Action</th></tr></thead><tbody>${localRow}${peerRows}</tbody></table>
+         <div id="cluster-result" class="result" style="margin-top:0.75rem"></div>`;
     }
 
     function renderDns(d) {
@@ -299,33 +305,32 @@
     }
 
     async function triggerFailover() {
-      if (!confirm('Trigger a manual DNS failover to this node\'s public IP?\n\nThis will update the DNS records immediately.')) return;
+      triggerFailoverOn(null);
+    }
 
-      const btn = document.getElementById('failover-btn');
-      const result = document.getElementById('failover-result');
-      btn.disabled = true;
-      btn.textContent = 'Triggering…';
-      result.className = 'result';
+    async function triggerFailoverOn(targetNode) {
+      const label = targetNode || 'this node';
+      if (!confirm(`Trigger a manual DNS failover on ${label}?\n\nThis will update the DNS records immediately.`)) return;
+
+      const localResult = document.getElementById('failover-result');
+      const clusterResult = document.getElementById('cluster-result');
+
+      const url = targetNode
+        ? `/admin/cluster/failover?node=${encodeURIComponent(targetNode)}`
+        : '/admin/cluster/failover';
 
       try {
-        const r = await fetch('/admin/cluster/failover', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' }
-        });
+        const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' } });
         const d = await r.json();
-        if (d.ok) {
-          result.className = 'result result-ok';
-          result.textContent = '✓ DNS updated to ' + d.ip;
-        } else {
-          result.className = 'result result-error';
-          result.textContent = '✗ ' + d.error;
-        }
+        const msg = d.ok ? `✓ DNS on ${label} updated to ${d.ip}` : `✗ ${d.error}`;
+        const cls = d.ok ? 'result result-ok' : 'result result-error';
+        if (localResult) { localResult.className = cls; localResult.textContent = msg; }
+        if (clusterResult) { clusterResult.className = cls; clusterResult.textContent = msg; }
       } catch (e) {
-        result.className = 'result result-error';
-        result.textContent = '✗ Request failed: ' + e.message;
+        const msg = '✗ Request failed: ' + e.message;
+        if (localResult) { localResult.className = 'result result-error'; localResult.textContent = msg; }
+        if (clusterResult) { clusterResult.className = 'result result-error'; clusterResult.textContent = msg; }
       } finally {
-        btn.disabled = false;
-        btn.textContent = 'Trigger DNS Failover';
         fetchStatus();
       }
     }

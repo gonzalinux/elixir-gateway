@@ -26,7 +26,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   When nodes connect or disconnect, weights automatically recalculate and load
   redistributes across the available nodes.
   """
-
+  use ElixirGateway.Cluster.RPC
   use GenServer
   require Logger
 
@@ -250,6 +250,35 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
   end
 
   @impl true
+  def handle_cast({:remote_node_weight, new_weight}, state) do
+    elem = Map.get(state.nodes, new_weight.node)
+    old_total = state.total_weight
+
+    state =
+      if elem != nil do
+        # Node already exists, subtract old weight
+        total_weight = state.total_weight - elem.weight
+        %{state | total_weight: total_weight}
+      else
+        state
+      end
+
+    # Preserve services if the peer didn't send them (older node version)
+    services = Map.get(new_weight, :services, [])
+    node_info = %{node: new_weight.node, weight: new_weight.weight, services: services}
+
+    nodes = Map.put(state.nodes, new_weight.node, node_info)
+    new_total = state.total_weight + new_weight.weight
+    state = %{state | nodes: nodes, total_weight: new_total}
+
+    Logger.info(
+      "Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}, services: #{length(services)}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
+    )
+
+    {:reply, :ok, state}
+  end
+
+  @impl true
   def handle_info(:cleanup, state) do
     cleanup_old_requests()
     schedule_cleanup()
@@ -263,20 +292,19 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
     services = get_local_service_keys()
 
     Task.start(fn ->
-      case :rpc.call(
-             peer_node,
-             __MODULE__,
-             :remote_node_weight,
-             [%{node: node(), weight: node_weight, services: services}],
-             30_000
-           ) do
+      case(
+        rpc_call(
+          peer_node,
+          {:remote_node_weight, %{node: node(), weight: node_weight, services: services}}
+        )
+      ) do
         :ok ->
           Logger.debug("Successfully shared weight with peer #{peer_node}")
 
-        {:badrpc, {:EXIT, {:noproc, _}}} ->
+        {:error, {:EXIT, {:noproc, _}}} ->
           Logger.info("Load distribution not enabled on peer #{peer_node}, skipping weight share")
 
-        {:badrpc, reason} ->
+        {:error, reason} ->
           Logger.warning("Failed to share weight with peer #{peer_node}: #{inspect(reason)}")
 
         other ->
@@ -309,47 +337,18 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
     {:noreply, state}
   end
 
+  @impl true
   @doc """
   RPC endpoint called when a node joins the cluster to broadcast its weight.
   """
-  @spec remote_node_weight(node_weights()) :: :ok | {:error, term()}
-  def remote_node_weight(new_weight) do
-    # TODO HARDCODED
-    GenServer.call(__MODULE__, {:remote_node_weight, new_weight}, 30_000)
+  @spec handle_rpc({:remote_node_weight, node_weights()}) :: :ok | {:error, term()}
+  def handle_rpc({:remote_node_weight, new_weight}) do
+    GenServer.cast(__MODULE__, {:remote_node_weight, new_weight})
   end
 
   @impl true
   def handle_call(:get_weights, _from, state) do
     {:reply, {state.total_weight, state.nodes}, state}
-  end
-
-  @impl true
-  def handle_call({:remote_node_weight, new_weight}, _from, state) do
-    elem = Map.get(state.nodes, new_weight.node)
-    old_total = state.total_weight
-
-    state =
-      if elem != nil do
-        # Node already exists, subtract old weight
-        total_weight = state.total_weight - elem.weight
-        %{state | total_weight: total_weight}
-      else
-        state
-      end
-
-    # Preserve services if the peer didn't send them (older node version)
-    services = Map.get(new_weight, :services, [])
-    node_info = %{node: new_weight.node, weight: new_weight.weight, services: services}
-
-    nodes = Map.put(state.nodes, new_weight.node, node_info)
-    new_total = state.total_weight + new_weight.weight
-    state = %{state | nodes: nodes, total_weight: new_total}
-
-    Logger.info(
-      "Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}, services: #{length(services)}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
-    )
-
-    {:reply, :ok, state}
   end
 
   @impl true

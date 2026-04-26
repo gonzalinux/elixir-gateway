@@ -1,5 +1,14 @@
 defmodule ElixirGatewayWeb.AdminController do
   use ElixirGatewayWeb, :controller
+  use ElixirGateway.Cluster.RPC
+
+  @impl ElixirGateway.Cluster.RPC
+  def handle_rpc({:trigger_failover}) do
+    case Process.whereis(ElixirGateway.Cluster.DNSFailover) do
+      nil -> {:error, "DNS failover not configured on this node"}
+      _pid -> ElixirGateway.Cluster.DNSFailover.trigger_failover()
+    end
+  end
 
   def index(conn, _params) do
     conn
@@ -11,18 +20,25 @@ defmodule ElixirGatewayWeb.AdminController do
     json(conn, build_status())
   end
 
-  def trigger_failover(conn, _params) do
-    case Process.whereis(ElixirGateway.Cluster.DNSFailover) do
-      nil ->
-        conn
-        |> put_status(422)
-        |> json(%{ok: false, error: "DNS failover is not configured on this node"})
+  def trigger_failover(conn, params) do
+    target_str = params["node"]
+    local = to_string(node())
 
-      _pid ->
-        case ElixirGateway.Cluster.DNSFailover.trigger_failover() do
-          {:ok, ip} -> json(conn, %{ok: true, ip: ip})
-          {:error, reason} -> json(conn, %{ok: false, error: inspect(reason)})
+    result =
+      if is_nil(target_str) or target_str == local do
+        handle_rpc({:trigger_failover})
+      else
+        try do
+          rpc_call(String.to_existing_atom(target_str), {:trigger_failover})
+        rescue
+          ArgumentError -> {:error, "Unknown node: #{target_str}"}
         end
+      end
+
+    case result do
+      {:ok, ip} when is_binary(ip) -> json(conn, %{ok: true, ip: ip})
+      {:ok, :not_primary} -> json(conn, %{ok: false, error: "Node is not a primary"})
+      {:error, reason} -> conn |> put_status(422) |> json(%{ok: false, error: inspect(reason)})
     end
   end
 
@@ -50,6 +66,7 @@ defmodule ElixirGatewayWeb.AdminController do
 
         %{
           enabled: true,
+          local_node: to_string(node()),
           healthy: ElixirGateway.Cluster.Manager.cluster_healthy?(),
           peer_health: peer_health,
           connected_peers:

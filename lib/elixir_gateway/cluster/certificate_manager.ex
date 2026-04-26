@@ -20,6 +20,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   """
 
   use GenServer
+  use ElixirGateway.Cluster.RPC
   require Logger
 
   alias ElixirGateway.Cluster.Manager, as: ClusterManager
@@ -66,12 +67,8 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     GenServer.cast(__MODULE__, {:certificates_generated, domain})
   end
 
-  @doc """
-  RPC endpoint called by primary to sync certificates to this node.
-  Only callable on secondary nodes.
-  """
-  @spec receive_certificates(cert_bundle()) :: :ok | {:error, term()}
-  def receive_certificates(cert_bundle) do
+  @impl ElixirGateway.Cluster.RPC
+  def handle_rpc({:sync_certificates, cert_bundle}) do
     timeout = get_rpc_timeout()
     GenServer.call(__MODULE__, {:receive_certificates, cert_bundle}, timeout)
   end
@@ -444,31 +441,14 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   defp broadcast_to_peer(peer_node, cert_bundle, rpc_timeout) do
     Logger.debug("Sending certificates to #{peer_node}")
 
-    try do
-      # Use native Erlang RPC to call receive_certificates on remote node
-      case :rpc.call(
-             peer_node,
-             __MODULE__,
-             :receive_certificates,
-             [cert_bundle],
-             rpc_timeout
-           ) do
-        :ok ->
-          Logger.info("Successfully synced certificates to #{peer_node}")
-          :ok
+    case rpc_call(peer_node, {:sync_certificates, cert_bundle}, rpc_timeout) do
+      :ok ->
+        Logger.info("Successfully synced certificates to #{peer_node}")
+        :ok
 
-        {:error, reason} = error ->
-          Logger.error("Failed to sync to #{peer_node}: #{inspect(reason)}")
-          error
-
-        {:badrpc, reason} ->
-          Logger.error("RPC error to #{peer_node}: #{inspect(reason)}")
-          {:error, {:badrpc, reason}}
-      end
-    catch
-      kind, error ->
-        Logger.error("Exception during RPC to #{peer_node}: #{inspect({kind, error})}")
-        {:error, {:exception, kind, error}}
+      {:error, reason} = error ->
+        Logger.error("Failed to sync to #{peer_node}: #{inspect(reason)}")
+        error
     end
   end
 
