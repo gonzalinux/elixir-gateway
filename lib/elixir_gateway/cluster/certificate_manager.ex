@@ -493,30 +493,12 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     # data at startup rather than a file path reference.
     endpoint = ElixirGatewayWeb.Endpoint
 
-    children = Supervisor.which_children(endpoint)
-    Logger.info("Endpoint supervisor children: #{inspect(Enum.map(children, fn {id, _pid, type, mods} -> {id, type, mods} end))}")
+    case Supervisor.restart_child(endpoint, {endpoint, :https}) do
+      {:ok, _pid} ->
+        Logger.info("HTTPS listener restarted with new certificates")
 
-    https_child =
-      Enum.find(children, fn {id, _pid, _type, _mods} ->
-        case id do
-          {Bandit, :https} -> true
-          {Bandit, ^endpoint, :https} -> true
-          _ -> false
-        end
-      end)
-
-    case https_child do
-      {id, _pid, :worker, _mods} ->
-        case Supervisor.restart_child(endpoint, id) do
-          {:ok, _pid} ->
-            Logger.info("HTTPS listener restarted with new certificates")
-
-          {:error, reason} ->
-            Logger.warning("Could not restart HTTPS listener: #{inspect(reason)}")
-        end
-
-      nil ->
-        Logger.warning("HTTPS listener not found in supervisor, relying on PEM cache clear only")
+      {:error, reason} ->
+        Logger.warning("Could not restart HTTPS listener: #{inspect(reason)}")
     end
 
     :ok
