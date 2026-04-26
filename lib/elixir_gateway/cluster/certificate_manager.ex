@@ -499,11 +499,37 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   end
 
   defp reload_endpoint_certificates do
-    # Clear SSL PEM cache to force reload
     :ssl.clear_pem_cache()
 
-    # Notify endpoint - it will pick up new certs on next SSL handshake
-    Logger.info("SSL PEM cache cleared, new certificates will be used")
+    # Restart the HTTPS Bandit listener so it re-reads the cert files from disk.
+    # clear_pem_cache alone is insufficient when SiteEncrypt passes cert as binary
+    # data at startup rather than a file path reference.
+    endpoint = ElixirGatewayWeb.Endpoint
+
+    https_child =
+      endpoint
+      |> Supervisor.which_children()
+      |> Enum.find(fn {id, _pid, _type, _mods} ->
+        case id do
+          {Bandit, :https} -> true
+          {Bandit, ^endpoint, :https} -> true
+          _ -> false
+        end
+      end)
+
+    case https_child do
+      {id, _pid, :worker, _mods} ->
+        case Supervisor.restart_child(endpoint, id) do
+          {:ok, _pid} ->
+            Logger.info("HTTPS listener restarted with new certificates")
+
+          {:error, reason} ->
+            Logger.warning("Could not restart HTTPS listener: #{inspect(reason)}")
+        end
+
+      nil ->
+        Logger.warning("HTTPS listener not found in supervisor, relying on PEM cache clear only")
+    end
 
     :ok
   end
