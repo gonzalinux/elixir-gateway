@@ -275,7 +275,7 @@ defmodule ElixirGateway.Cluster.LoadDistributor do
       "Load distributor: Node #{if elem, do: "updated", else: "joined"} #{new_weight.node} (weight: #{new_weight.weight}, services: #{length(services)}), total weight: #{old_total} -> #{new_total}, active nodes: #{map_size(nodes)}"
     )
 
-    {:reply, :ok, state}
+    {:noreply, state}
   end
 
   @impl true

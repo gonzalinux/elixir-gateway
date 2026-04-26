@@ -277,22 +277,9 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   end
 
   defp get_primary_domain do
-    # Get the first domain from LETSENCRYPT_DOMAINS env var
-    case System.get_env("LETSENCRYPT_DOMAINS") do
-      nil ->
-        {:error, :no_domains}
-
-      domains_string ->
-        domains =
-          domains_string
-          |> String.split(",")
-          |> Enum.map(&String.trim/1)
-          |> Enum.reject(&(&1 == ""))
-
-        case domains do
-          [domain | _] -> {:ok, domain}
-          [] -> {:error, :no_domains}
-        end
+    case ElixirGateway.SiteEncrypt.get_domains() do
+      [domain | _] -> {:ok, domain}
+      [] -> {:error, :no_domains}
     end
   end
 
