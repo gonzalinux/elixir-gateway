@@ -491,12 +491,14 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     # Restart the HTTPS Bandit listener so it re-reads the cert files from disk.
     # clear_pem_cache alone is insufficient when SiteEncrypt passes cert as binary
     # data at startup rather than a file path reference.
+    # Must terminate first — restart_child only works on already-stopped children.
     endpoint = ElixirGatewayWeb.Endpoint
+    child_id = {endpoint, :https}
 
-    case Supervisor.restart_child(endpoint, {endpoint, :https}) do
-      {:ok, _pid} ->
-        Logger.info("HTTPS listener restarted with new certificates")
-
+    with :ok <- Supervisor.terminate_child(endpoint, child_id),
+         {:ok, _pid} <- Supervisor.restart_child(endpoint, child_id) do
+      Logger.info("HTTPS listener restarted with new certificates")
+    else
       {:error, reason} ->
         Logger.warning("Could not restart HTTPS listener: #{inspect(reason)}")
     end
