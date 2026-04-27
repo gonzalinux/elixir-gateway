@@ -3,20 +3,16 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   Manages certificate synchronization across the distributed cluster.
 
   Architecture:
-  - Primary node: Generates certificates via SiteEncrypt, broadcasts to peers (typically home server)
-  - Secondary nodes: Receive certificates via distributed Erlang RPC, validate and install (typically cloud servers)
+  - Primary node: Certbot issues/renews certs, broadcasts to peers via RPC
+  - Secondary nodes: Receive cert files via RPC, write to their certbot live dir, reload CertStore
 
   Role Determination:
   1. Explicit: IS_PRIMARY env var (true/false)
-  2. Auto-detect: DNS failover enabled → Primary (manages DNS), otherwise Secondary
-
-  Typical Setup:
-  - Primary (home server): Manages DNS failover, generates certs, knows peer IPs, CLUSTER_PEERS="cloud-a@ip:port,cloud-b@ip:port"
-  - Secondary (cloud servers): Accept connections, receive certs, CLUSTER_PEERS="" (empty)
+  2. Auto-detect: peers configured → Primary, otherwise Secondary
 
   Certificate Flow:
-  Primary: SiteEncrypt generates → handle_new_cert callback → broadcast_certificates
-  Secondary: receive_certificates RPC → validate → write to disk → reload endpoint
+  Primary: CertbotRunner succeeds → on_certificates_generated → broadcast_certificates
+  Secondary: receive_certificates RPC → validate → write to certbot live dir → CertStore.reload()
   """
 
   use GenServer
@@ -29,9 +25,8 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   @typedoc "Certificate bundle with all required files"
   @type cert_bundle :: %{
           domain: String.t(),
-          cert_pem: binary(),
+          fullchain_pem: binary(),
           privkey_pem: binary(),
-          chain_pem: binary(),
           checksum: binary(),
           generated_at: DateTime.t()
         }
@@ -41,7 +36,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   defstruct [
     :role,
     :cert_sync_enabled,
-    :db_folder,
+    :live_dir,
     :last_sync,
     :sync_failures,
     :rpc_timeout,
@@ -100,14 +95,14 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     enabled = Keyword.get(cert_sync_config, :enabled, true)
     role = determine_role(cluster_config)
 
-    db_folder = get_cert_db_folder()
+    live_dir = certbot_live_dir()
     rpc_timeout = Keyword.get(cert_sync_config, :rpc_timeout, 30_000)
     max_retries = Keyword.get(cert_sync_config, :max_retries, 3)
 
     state = %__MODULE__{
       role: role,
       cert_sync_enabled: enabled,
-      db_folder: db_folder,
+      live_dir: live_dir,
       last_sync: nil,
       sync_failures: 0,
       rpc_timeout: rpc_timeout,
@@ -115,7 +110,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     }
 
     if enabled do
-      Logger.info("Certificate sync manager started as #{role} (db: #{db_folder})")
+      Logger.info("Certificate sync manager started as #{role} (live: #{live_dir})")
 
       # Primary nodes monitor for new peers to automatically sync certificates
       if role == :primary do
@@ -132,7 +127,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   @impl true
   def handle_cast({:certificates_generated, domain}, %{role: :primary} = state) do
     if state.cert_sync_enabled do
-      Logger.info("Certificates generated for #{domain}, broadcasting to cluster")
+      Logger.info("Certbot issued/renewed cert for #{domain}, broadcasting to cluster")
 
       case broadcast_certificates(domain, state) do
         :ok ->
@@ -179,7 +174,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     status = %{
       role: state.role,
       cert_sync_enabled: state.cert_sync_enabled,
-      db_folder: state.db_folder,
+      live_dir: state.live_dir,
       last_sync: state.last_sync,
       sync_failures: state.sync_failures,
       clustering_enabled: clustering_enabled?()
@@ -238,7 +233,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     Logger.info("Initiating automatic certificate sync to #{node}")
 
     with {:ok, domain} <- get_primary_domain(),
-         {:ok, _cert_bundle} <- read_certificates(domain, state.db_folder),
+         {:ok, _cert_bundle} <- read_certificates(domain, state.live_dir),
          :ok <- broadcast_to_peer(node, domain, state) do
       Logger.info("Successfully synced certificates to new peer #{node}")
     else
@@ -277,7 +272,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   end
 
   defp get_primary_domain do
-    case ElixirGateway.SiteEncrypt.get_domains() do
+    case Application.get_env(:elixirgateway, :letsencrypt_domains, []) do
       [domain | _] -> {:ok, domain}
       [] -> {:error, :no_domains}
     end
@@ -315,12 +310,14 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     Keyword.get(config, :enabled, false)
   end
 
-  defp get_cert_db_folder do
-    System.get_env("SITE_ENCRYPT_DB") || Path.join("priv", "certs")
+  defp certbot_live_dir do
+    Application.get_env(:elixirgateway, :cert_store, [])
+    |> Keyword.get(:certbot_config_dir)
+    |> Path.join("live")
   end
 
   defp broadcast_certificates(domain, state) do
-    with {:ok, cert_bundle} <- read_certificates(domain, state.db_folder),
+    with {:ok, cert_bundle} <- read_certificates(domain, state.live_dir),
          {:ok, peers} <- get_connected_peers() do
       if peers == [] do
         Logger.info("No connected peers to sync certificates to")
@@ -344,32 +341,21 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     end
   end
 
-  defp read_certificates(domain, db_folder) do
-    cert_folder = Path.join([db_folder, "certs", domain])
+  defp read_certificates(domain, live_dir) do
+    cert_dir = Path.join(live_dir, domain)
 
-    files = %{
-      cert_pem: Path.join(cert_folder, "cert.pem"),
-      privkey_pem: Path.join(cert_folder, "privkey.pem"),
-      chain_pem: Path.join(cert_folder, "chain.pem")
-    }
+    with {:ok, fullchain_pem} <- File.read(Path.join(cert_dir, "fullchain.pem")),
+         {:ok, privkey_pem} <- File.read(Path.join(cert_dir, "privkey.pem")) do
+      checksum = :crypto.hash(:sha256, fullchain_pem <> privkey_pem)
 
-    # Read all files
-    with {:ok, cert_pem} <- File.read(files.cert_pem),
-         {:ok, privkey_pem} <- File.read(files.privkey_pem),
-         {:ok, chain_pem} <- File.read(files.chain_pem) do
-      # Create checksum of all content
-      checksum = :crypto.hash(:sha256, cert_pem <> privkey_pem <> chain_pem)
-
-      bundle = %{
-        domain: domain,
-        cert_pem: cert_pem,
-        privkey_pem: privkey_pem,
-        chain_pem: chain_pem,
-        checksum: checksum,
-        generated_at: DateTime.utc_now()
-      }
-
-      {:ok, bundle}
+      {:ok,
+       %{
+         domain: domain,
+         fullchain_pem: fullchain_pem,
+         privkey_pem: privkey_pem,
+         checksum: checksum,
+         generated_at: DateTime.utc_now()
+       }}
     else
       {:error, reason} ->
         Logger.error("Failed to read certificates for #{domain}: #{inspect(reason)}")
@@ -419,8 +405,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   end
 
   defp broadcast_to_peer(peer_node, domain, state) when is_binary(domain) do
-    # Read certificates and broadcast to a specific peer
-    with {:ok, cert_bundle} <- read_certificates(domain, state.db_folder) do
+    with {:ok, cert_bundle} <- read_certificates(domain, state.live_dir) do
       broadcast_to_peer(peer_node, cert_bundle, state.rpc_timeout)
     end
   end
@@ -442,40 +427,31 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   defp install_certificates(cert_bundle, state) do
     Logger.info("Installing certificates for #{cert_bundle.domain}")
 
-    # Validate checksum
     computed_checksum =
-      :crypto.hash(
-        :sha256,
-        cert_bundle.cert_pem <> cert_bundle.privkey_pem <> cert_bundle.chain_pem
-      )
+      :crypto.hash(:sha256, cert_bundle.fullchain_pem <> cert_bundle.privkey_pem)
 
     if computed_checksum != cert_bundle.checksum do
-      Logger.error("Certificate checksum mismatch!")
+      Logger.error("Certificate checksum mismatch for #{cert_bundle.domain}")
       {:error, :checksum_mismatch}
     else
-      # Write certificates to disk
-      cert_folder = Path.join([state.db_folder, "certs", cert_bundle.domain])
-      File.mkdir_p!(cert_folder)
-      File.chmod!(cert_folder, 0o700)
+      cert_dir = Path.join(state.live_dir, cert_bundle.domain)
+      File.mkdir_p!(cert_dir)
+      File.chmod!(cert_dir, 0o700)
 
       files = [
-        {"cert.pem", cert_bundle.cert_pem},
-        {"privkey.pem", cert_bundle.privkey_pem},
-        {"chain.pem", cert_bundle.chain_pem}
+        {"fullchain.pem", cert_bundle.fullchain_pem},
+        {"privkey.pem", cert_bundle.privkey_pem}
       ]
 
       try do
         Enum.each(files, fn {filename, content} ->
-          path = Path.join(cert_folder, filename)
+          path = Path.join(cert_dir, filename)
           File.write!(path, content)
           File.chmod!(path, 0o600)
         end)
 
-        Logger.info("Certificates written to #{cert_folder}")
-
-        # Reload endpoint to pick up new certificates
-        reload_endpoint_certificates()
-
+        Logger.info("Certificates written to #{cert_dir}")
+        ElixirGateway.CertStore.reload()
         :ok
       rescue
         error ->
@@ -483,26 +459,5 @@ defmodule ElixirGateway.Cluster.CertificateManager do
           {:error, {:write_failed, error}}
       end
     end
-  end
-
-  defp reload_endpoint_certificates do
-    :ssl.clear_pem_cache()
-
-    # Restart the HTTPS Bandit listener so it re-reads the cert files from disk.
-    # clear_pem_cache alone is insufficient when SiteEncrypt passes cert as binary
-    # data at startup rather than a file path reference.
-    # Must terminate first — restart_child only works on already-stopped children.
-    endpoint = ElixirGatewayWeb.Endpoint
-    child_id = {endpoint, :https}
-
-    with :ok <- Supervisor.terminate_child(endpoint, child_id),
-         {:ok, _pid} <- Supervisor.restart_child(endpoint, child_id) do
-      Logger.info("HTTPS listener restarted with new certificates")
-    else
-      {:error, reason} ->
-        Logger.warning("Could not restart HTTPS listener: #{inspect(reason)}")
-    end
-
-    :ok
   end
 end

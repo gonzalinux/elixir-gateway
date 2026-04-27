@@ -8,31 +8,19 @@ import Config
 
 # Port configuration for all environments
 # Can be overridden with HTTP_PORT and HTTPS_PORT environment variables
-if System.get_env("HTTP_PORT") || System.get_env("HTTPS_PORT") do
-  http_port = System.get_env("HTTP_PORT")
-  https_port = System.get_env("HTTPS_PORT")
+if http_port = System.get_env("HTTP_PORT") do
+  config :elixirgateway, ElixirGatewayWeb.Endpoint,
+    http: [ip: {0, 0, 0, 0}, port: String.to_integer(http_port)]
+end
 
-  endpoint_config = []
+if https_port = System.get_env("HTTPS_PORT") do
+  # Merge into existing https config so transport_options (SNI callback) is preserved
+  existing_https =
+    Application.get_env(:elixirgateway, ElixirGatewayWeb.Endpoint, [])
+    |> Keyword.get(:https, [])
 
-  # HTTP port override (for ACME challenges)
-  endpoint_config =
-    if http_port do
-      [{:http, [ip: {0, 0, 0, 0}, port: String.to_integer(http_port)]} | endpoint_config]
-    else
-      endpoint_config
-    end
-
-  # HTTPS port override
-  endpoint_config =
-    if https_port do
-      [{:https, [port: String.to_integer(https_port)]} | endpoint_config]
-    else
-      endpoint_config
-    end
-
-  if endpoint_config != [] do
-    config :elixirgateway, ElixirGatewayWeb.Endpoint, endpoint_config
-  end
+  config :elixirgateway, ElixirGatewayWeb.Endpoint,
+    https: Keyword.put(existing_https, :port, String.to_integer(https_port))
 end
 
 # Metrics authentication token (all environments)

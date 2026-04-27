@@ -31,13 +31,17 @@ FROM alpine:3.20.3
 
 ARG MIX_ENV=prod
 
-RUN apk add --no-cache openssl ncurses-libs ca-certificates bash curl libstdc++ libgcc
+RUN apk add --no-cache openssl ncurses-libs ca-certificates bash curl libstdc++ libgcc certbot certbot-dns-cloudflare
 
 RUN addgroup -g 1000 gateway && \
     adduser -u 1000 -G gateway -s /bin/sh -D gateway
 
-RUN mkdir -p /app /app/logs /etc/elixirgateway/certs && \
-    chown -R gateway:gateway /app /etc/elixirgateway
+RUN mkdir -p /app /app/logs \
+      /app/certbot/config \
+      /app/certbot/work \
+      /app/certbot/logs \
+      /app/certbot/webroot/.well-known/acme-challenge && \
+    chown -R gateway:gateway /app
 
 COPY --from=builder --chown=gateway:gateway /app/_build/${MIX_ENV}/rel/elixirgateway /app
 COPY --from=builder --chown=gateway:gateway /app/priv/static_epmd/Elixir.StaticEpmd.beam /app/static_epmd/Elixir.StaticEpmd.beam

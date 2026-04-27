@@ -11,14 +11,13 @@ config :elixirgateway, ElixirGatewayWeb.Endpoint,
   url: [host: "localhost", port: 4003, scheme: "https"],
   # Binding to all interfaces to allow testing from other machines
   http: [ip: {0, 0, 0, 0}, port: 4004],
-  # Enable HTTPS with SiteEncrypt for development
   https: [
     ip: {0, 0, 0, 0},
     port: 4003,
     cipher_suite: :strong,
-    # SiteEncrypt will automatically provide these
-    keyfile: {SiteEncrypt, {:pem_encoder, :key}},
-    certfile: {SiteEncrypt, {:pem_encoder, :cert}}
+    thousand_island_options: [
+      transport_options: [sni_fun: &ElixirGateway.CertStore.sni_fun/1]
+    ]
   ],
   # Server configuration
   server: true,
@@ -43,11 +42,6 @@ config :elixirgateway, :bot_blocker,
   # 1 hour
   block_duration_seconds: 3600,
   max_404s_before_block: 10
-
-# SiteEncrypt configuration for development
-config :site_encrypt, ElixirGateway.SiteEncrypt,
-  # Use this endpoint for ACME HTTP-01 challenges
-  endpoint: ElixirGatewayWeb.Endpoint
 
 # Enable dev routes for dashboard and mailbox
 config :elixirgateway, dev_routes: true
