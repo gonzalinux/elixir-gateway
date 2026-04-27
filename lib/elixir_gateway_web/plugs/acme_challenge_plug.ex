@@ -4,10 +4,21 @@ defmodule ElixirGatewayWeb.Plugs.AcmeChallengePlug do
 
   def init(opts), do: opts
 
+  # Let's Encrypt tokens are base64url (A-Z, a-z, 0-9, -, _) with no padding.
+  # Reject anything else before touching the filesystem.
+  @token_re ~r/\A[A-Za-z0-9_-]+\z/
+
   def call(conn, _opts) do
     case conn.path_info do
-      [token] when byte_size(token) > 0 -> serve_token(conn, token)
-      _ -> conn |> send_resp(404, "")
+      [token] when byte_size(token) > 0 ->
+        if String.match?(token, @token_re) do
+          serve_token(conn, token)
+        else
+          conn |> send_resp(400, "")
+        end
+
+      _ ->
+        conn |> send_resp(404, "")
     end
     |> halt()
   end

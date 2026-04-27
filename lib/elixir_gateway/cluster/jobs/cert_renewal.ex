@@ -15,14 +15,24 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewal do
 
   def run do
     if primary_node?() do
-      domains = Application.get_env(:elixirgateway, :letsencrypt_domains, [])
-      due = Enum.filter(domains, &needs_renewal?/1)
+      http_domains = Application.get_env(:elixirgateway, :letsencrypt_domains, [])
+      dns_domains = Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
 
-      if due == [] do
-        Logger.info("CertRenewal: all #{length(domains)} cert(s) are up to date")
+      http_due = Enum.filter(http_domains, &needs_renewal?/1)
+      dns_due = Enum.filter(dns_domains, &needs_renewal?/1)
+
+      total = length(http_domains) + length(dns_domains)
+      total_due = length(http_due) + length(dns_due)
+
+      if total_due == 0 do
+        Logger.info("CertRenewal: all #{total} cert(s) are up to date")
       else
-        Logger.info("CertRenewal: queuing renewal for #{length(due)} domain(s): #{Enum.join(due, ", ")}")
-        Enum.each(due, &ElixirGateway.CertbotRunner.ensure_cert/1)
+        Logger.info(
+          "CertRenewal: queuing renewal for #{total_due} domain(s): #{Enum.join(http_due ++ dns_due, ", ")}"
+        )
+
+        Enum.each(http_due, &ElixirGateway.CertbotRunner.ensure_cert/1)
+        Enum.each(dns_due, &ElixirGateway.CertbotRunner.ensure_wildcard_cert/1)
       end
     else
       Logger.debug("CertRenewal: secondary node, skipping")

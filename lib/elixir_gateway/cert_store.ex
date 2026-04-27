@@ -63,35 +63,45 @@ defmodule ElixirGateway.CertStore do
 
   @impl true
   def init(_opts) do
-    :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
+    if :ets.whereis(@table) == :undefined do
+      :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
+    end
+
     populate()
     {:ok, %{}}
   end
 
   @impl true
   def handle_cast(:reload, state) do
-    :ets.delete_all_objects(@table)
     populate()
     {:noreply, state}
   end
 
   # — Private —
 
+  # Collects all ETS entries from disk first, then swaps atomically so the
+  # table is never empty during a reload (avoids SNI misses on live traffic).
   defp populate do
+    entries = collect_entries()
+    :ets.delete_all_objects(@table)
+    :ets.insert(@table, entries)
+    Logger.info("CertStore: #{length(entries)} SNI entries loaded")
+  end
+
+  defp collect_entries do
     live_dir = certbot_live_dir()
 
     if File.dir?(live_dir) do
       live_dir
       |> File.ls!()
-      |> Enum.each(&load_cert_dir(live_dir, &1))
+      |> Enum.flat_map(&read_cert_dir(live_dir, &1))
     else
       Logger.debug("CertStore: #{live_dir} not found, no certbot certs loaded")
+      []
     end
-
-    Logger.info("CertStore: #{:ets.info(@table, :size)} SNI entries loaded")
   end
 
-  defp load_cert_dir(live_dir, domain) do
+  defp read_cert_dir(live_dir, domain) do
     cert_dir = Path.join(live_dir, domain)
     fullchain = Path.join(cert_dir, "fullchain.pem")
     privkey = Path.join(cert_dir, "privkey.pem")
@@ -101,10 +111,12 @@ defmodule ElixirGateway.CertStore do
          {:ok, pem} <- File.read(fullchain),
          [_ | _] = sans <- cert_sans(pem) do
       ssl_opts = [certfile: fullchain, keyfile: privkey]
-      Enum.each(sans, fn san -> :ets.insert(@table, {san, ssl_opts}) end)
       Logger.debug("CertStore: loaded #{domain} (#{length(sans)} SANs)")
+      Enum.map(sans, fn san -> {san, ssl_opts} end)
     else
-      _ -> Logger.warning("CertStore: skipped #{domain} — missing or unreadable cert files")
+      _ ->
+        Logger.warning("CertStore: skipped #{domain} — missing or unreadable cert files")
+        []
     end
   end
 

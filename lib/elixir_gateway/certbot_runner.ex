@@ -30,7 +30,7 @@ defmodule ElixirGateway.CertbotRunner do
   end
 
   @doc """
-  Queues a DNS-01 cert issuance for the wildcard writeinone.com cert.
+  Queues a DNS-01 cert issuance for the wildcard certs.
   Requires a Cloudflare credentials file at the configured path.
   """
   def ensure_wildcard_cert(apex_domain) do
@@ -49,6 +49,7 @@ defmodule ElixirGateway.CertbotRunner do
     {:noreply, enqueue(state, {:http01, domain})}
   end
 
+  @impl true
   def handle_cast({:ensure_wildcard, apex_domain}, state) do
     {:noreply, enqueue(state, {:dns01, apex_domain})}
   end
@@ -117,12 +118,16 @@ defmodule ElixirGateway.CertbotRunner do
 
   defp certbot(args) do
     base_args = [
-      "--config-dir", config(:certbot_config_dir),
-      "--work-dir", config(:certbot_work_dir),
-      "--logs-dir", config(:certbot_logs_dir),
+      "--config-dir",
+      config(:certbot_config_dir),
+      "--work-dir",
+      config(:certbot_work_dir),
+      "--logs-dir",
+      config(:certbot_logs_dir),
       "--non-interactive",
       "--agree-tos",
-      "--email", letsencrypt_email()
+      "--email",
+      letsencrypt_email()
     ]
 
     case System.cmd("certbot", ["certonly"] ++ args ++ base_args, stderr_to_stdout: true) do
@@ -138,19 +143,26 @@ defmodule ElixirGateway.CertbotRunner do
   defp http01_args(domain) do
     [
       "--webroot",
-      "--webroot-path", config(:acme_webroot),
-      "--cert-name", domain,
-      "-d", domain
+      "--webroot-path",
+      config(:acme_webroot),
+      "--cert-name",
+      domain,
+      "-d",
+      domain
     ]
   end
 
   defp dns01_args(apex_domain) do
     [
       "--dns-cloudflare",
-      "--dns-cloudflare-credentials", config(:cloudflare_credentials),
-      "--cert-name", apex_domain,
-      "-d", apex_domain,
-      "-d", "*.#{apex_domain}"
+      "--dns-cloudflare-credentials",
+      config(:cloudflare_credentials),
+      "--cert-name",
+      apex_domain,
+      "-d",
+      apex_domain,
+      "-d",
+      "*.#{apex_domain}"
     ]
   end
 
