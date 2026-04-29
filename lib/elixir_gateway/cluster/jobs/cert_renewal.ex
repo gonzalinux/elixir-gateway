@@ -39,14 +39,12 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewal do
     end
   end
 
-  defp needs_renewal?(domain) do
+  def needs_renewal?(domain) do
     case ElixirGateway.CertStore.days_until_expiry(domain) do
       :no_cert -> true
       days -> days < @renew_within_days
     end
   end
 
-  defp primary_node? do
-    System.get_env("IS_PRIMARY") != "false"
-  end
+  defp primary_node?, do: ElixirGateway.Cluster.Role.primary?()
 end

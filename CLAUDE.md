@@ -213,16 +213,43 @@ end
 - Environment-based configuration (dev/staging/prod)
 - Manual SSL configuration support
 
+#### Role Detection
+All subsystems (cert renewal, cert sync, DNS failover, IP change detection) share a single source of truth: **`ElixirGateway.Cluster.Role.primary?/0`**.
+
+Resolution order:
+1. `IS_PRIMARY=true` → primary (explicit override)
+2. `IS_PRIMARY=false` → secondary (explicit override)
+3. `CLUSTER_PEERS` non-empty → primary (auto-detect: manages cert distribution)
+4. DNS failover configured and enabled → primary (auto-detect: manages DNS updates)
+5. Default → primary (single-node mode, no clustering)
+
+Never re-implement role detection inline — always call `ElixirGateway.Cluster.Role.primary?()`.
+
+#### Certbot Management
+- **`CertbotRunner`** — serial queue for certbot invocations (certbot uses a lock file, so only one can run at a time)
+  - Runs each certbot invocation in a `Task.Supervisor.async_nolink` task so a certbot crash does not bring down the GenServer
+  - Task supervisor: `ElixirGateway.CertbotRunner.TaskSupervisor` (started before `CertbotRunner` in the supervision tree)
+  - On success: reloads `CertStore` and notifies `CertificateManager` to broadcast to peers
+  - Supports HTTP-01 (`ensure_cert/1`) and DNS-01/Cloudflare wildcard (`ensure_wildcard_cert/1`) issuance
+  - DNS provider credentials live in `dns_providers/` at the project root:
+    - `cloudflare.example.ini` — committed template with instructions
+    - `cloudflare.ini` — gitignored; copy from the example and set `dns_cloudflare_api_token`
+    - `docker-compose.yml` mounts `./dns_providers/cloudflare.ini` read-only to `/app/certbot/cloudflare.ini` inside the container (the path certbot is configured to read)
+- **`CertStore`** — ETS-backed SNI lookup table populated from the certbot live directory
+  - `populate/0` is non-destructive: upserts new entries then removes stale ones, so the table is never empty during a reload (avoids SNI misses on live traffic)
+  - Wildcard certs (`*.example.com`) are stored under the apex (`example.com`) — `sni_fun/1` does a second lookup stripping the first DNS label for wildcard matches
+  - `cert_sans/1` gracefully rescues exceptions from `:public_key.pkix_decode_cert/2`, which raises on malformed DER rather than returning an error tuple
+
 #### Distributed Cluster SSL Behavior
 **IMPORTANT:** Certificate challenges are role-aware to prevent multiple nodes from attempting Let's Encrypt ACME challenges:
 
-- **Primary nodes** (`IS_PRIMARY` not set, or peers configured):
+- **Primary nodes** (`IS_PRIMARY` not set, or peers/DNS failover configured):
   - Run SiteEncrypt with full ACME challenge capability
-  - Generate Let's Encrypt certificates automatically
-  - Broadcast certificates to secondary nodes via Erlang RPC:
+  - Generate Let's Encrypt certificates automatically via `CertbotRunner`
+  - Broadcast **all** certificates (both HTTP-01 and DNS-01 wildcard) to secondary nodes via Erlang RPC:
     - **Automatically** when new certificates are generated
     - **Automatically** when a secondary node connects to the cluster (3-second delay to ensure SiteEncrypt initialization completes)
-  - Monitor node connections to ensure new peers receive existing certificates
+  - Monitor node connections to ensure new peers receive all existing certificates
 
 - **Secondary nodes** (`IS_PRIMARY=false`):
   - Run SiteEncrypt in **manual mode** with empty domains
@@ -230,11 +257,6 @@ end
   - Receive certificates from primary via `CertificateManager` cluster sync
   - Certificates written to same `SITE_ENCRYPT_DB` path and loaded automatically
   - Automatically receive certificates upon connecting to primary (no manual sync needed)
-
-**Role Detection:**
-1. Explicit: `IS_PRIMARY=false` → Secondary (receives certs)
-2. Auto-detect: `CLUSTER_PEERS` configured → Primary (generates certs)
-3. Default (no clustering): Primary (generates certs)
 
 **Configuration:**
 ```bash
@@ -252,6 +274,11 @@ export CLUSTER_PEERS=""  # Empty, accepts connections
 - Let's Encrypt rate limit exhaustion (5 failed authorizations/hour)
 - Certificate sync becoming ineffective
 - Deployment failures in containerized environments with independent storage
+
+**Domain lists used by cert management:**
+- `:letsencrypt_domains` — HTTP-01 domains (set via `LETSENCRYPT_DOMAINS` env var or YAML config); wildcards (`*.example.com`) are excluded at config-load time
+- `:letsencrypt_wildcard_domains` — DNS-01 apex domains (set via `LETSENCRYPT_WILDCARD_DOMAINS` or YAML `dns_challenge: true`); certbot stores certs under the apex, e.g. `example.com` for `*.example.com`
+- On peer connect, `CertificateManager` syncs all domains from both lists
 
 ### WebSocket Architecture
 - Transparent proxying with session preservation

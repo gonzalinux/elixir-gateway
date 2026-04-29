@@ -93,7 +93,7 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     cert_sync_config = Keyword.get(cluster_config, :cert_sync, [])
 
     enabled = Keyword.get(cert_sync_config, :enabled, true)
-    role = determine_role(cluster_config)
+    role = if ElixirGateway.Cluster.Role.primary?(), do: :primary, else: :secondary
 
     live_dir = certbot_live_dir()
     rpc_timeout = Keyword.get(cert_sync_config, :rpc_timeout, 30_000)
@@ -290,33 +290,6 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   # Certbot stores wildcard certs under the apex domain, e.g. "*.example.com" → "example.com"
   defp to_cert_name("*." <> apex), do: apex
   defp to_cert_name(domain), do: domain
-
-  defp determine_role(cluster_config) do
-    # 1. Check explicit override
-    case System.get_env("IS_PRIMARY") do
-      "true" ->
-        Logger.info("Role: Primary (explicit IS_PRIMARY=true)")
-        :primary
-
-      "false" ->
-        Logger.info("Role: Secondary (explicit IS_PRIMARY=false)")
-        :secondary
-
-      _ ->
-        # 2. Auto-detect from peers configuration
-        # Primary (home server with dynamic IP) knows about cloud servers and has peers configured
-        # Secondary (cloud servers with static IP) accepts connections and has no peers
-        peers = Keyword.get(cluster_config, :peers, [])
-
-        if peers != [] do
-          Logger.info("Role: Primary (auto-detected: peers configured)")
-          :primary
-        else
-          Logger.info("Role: Secondary (auto-detected: no peers configured)")
-          :secondary
-        end
-    end
-  end
 
   defp clustering_enabled? do
     config = Application.get_env(:elixirgateway, :cluster, [])
