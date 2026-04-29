@@ -41,6 +41,7 @@ defmodule ElixirGateway.CertbotRunner do
 
   @impl true
   def init(_opts) do
+    send(self(), :startup_cert_check)
     {:ok, %__MODULE__{}}
   end
 
@@ -73,6 +74,11 @@ defmodule ElixirGateway.CertbotRunner do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     Logger.error("CertbotRunner: certbot task crashed — #{inspect(reason)}")
     {:noreply, dispatch(%{state | task: nil})}
+  end
+
+  def handle_info(:startup_cert_check, state) do
+    ElixirGateway.Cluster.Jobs.CertRenewal.run()
+    {:noreply, state}
   end
 
   def handle_info(_, state), do: {:noreply, state}

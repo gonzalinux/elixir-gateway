@@ -116,9 +116,6 @@ defmodule ElixirGateway.Cluster.CertificateManager do
         # Monitor for new peers to automatically sync certificates
         :net_kernel.monitor_nodes(true, node_type: :all)
         Logger.debug("Monitoring node connections for automatic certificate sync")
-
-        # Trigger cert issuance/renewal at startup so a fresh deploy doesn't wait for the 2 AM cron
-        send(self(), :startup_cert_check)
       end
     else
       Logger.info("Certificate sync disabled")
@@ -194,12 +191,6 @@ defmodule ElixirGateway.Cluster.CertificateManager do
 
   def handle_call({:trigger_sync, _domain}, _from, %{role: :secondary} = state) do
     {:reply, {:error, :secondary_cannot_trigger}, state}
-  end
-
-  @impl true
-  def handle_info(:startup_cert_check, state) do
-    ElixirGateway.Cluster.Jobs.CertRenewal.run()
-    {:noreply, state}
   end
 
   @impl true
