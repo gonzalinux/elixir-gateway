@@ -11,11 +11,10 @@ services:
     env_file:
       - .env
     environment:
-      - SITE_ENCRYPT_DB=/etc/elixirgateway/certs
       - JSON_LOG_PATH=/app/logs/app.json.log
     network_mode: host
     volumes:
-      - certs:/etc/elixirgateway/certs
+      - certs:/app/certbot/config
       - logs:/app/logs
       - ./dns_providers:/app/certbot/dns_providers:ro
     restart: unless-stopped
