@@ -91,7 +91,7 @@ defmodule ElixirGateway.CertbotRunner do
         state
 
       {{:value, item}, rest} ->
-        task = Task.async(fn -> run(item) end)
+        task = Task.Supervisor.async_nolink(ElixirGateway.CertbotRunner.TaskSupervisor, fn -> run(item) end)
         %{state | queue: rest, task: task, current_item: item}
     end
   end

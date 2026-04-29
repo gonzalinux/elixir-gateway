@@ -232,18 +232,28 @@ defmodule ElixirGateway.Cluster.CertificateManager do
   def handle_info({:sync_to_new_peer, node}, %{role: :primary} = state) do
     Logger.info("Initiating automatic certificate sync to #{node}")
 
-    with {:ok, domain} <- get_primary_domain(),
-         {:ok, _cert_bundle} <- read_certificates(domain, state.live_dir),
-         :ok <- broadcast_to_peer(node, domain, state) do
-      Logger.info("Successfully synced certificates to new peer #{node}")
-    else
-      {:error, :no_domains} ->
-        Logger.debug("No domains configured, skipping automatic certificate sync")
+    domains = all_cert_domains()
 
-      {:error, reason} ->
-        # This handles errors from both read_certificates and broadcast_to_peer
-        # since they both return {:error, reason}
-        Logger.warning("Sync interrupted for #{node}: #{inspect(reason)}")
+    if domains == [] do
+      Logger.debug("No domains configured, skipping automatic certificate sync")
+    else
+      {succeeded, failed} =
+        domains
+        |> Enum.map(fn domain ->
+          case broadcast_to_peer(node, domain, state) do
+            :ok -> {:ok, domain}
+            {:error, reason} -> {:error, domain, reason}
+          end
+        end)
+        |> Enum.split_with(&match?({:ok, _}, &1))
+
+      Enum.each(failed, fn {:error, domain, reason} ->
+        Logger.warning("Failed to sync #{domain} to #{node}: #{inspect(reason)}")
+      end)
+
+      Logger.info(
+        "Certificate sync to #{node} complete: #{length(succeeded)}/#{length(domains)} domain(s) synced"
+      )
     end
 
     {:noreply, state}
@@ -271,12 +281,15 @@ defmodule ElixirGateway.Cluster.CertificateManager do
     Utils.exponential_backoff(attempt, base_delay: @sync_retry_base_delay)
   end
 
-  defp get_primary_domain do
-    case Application.get_env(:elixirgateway, :letsencrypt_domains, []) do
-      [domain | _] -> {:ok, domain}
-      [] -> {:error, :no_domains}
-    end
+  defp all_cert_domains do
+    http = Application.get_env(:elixirgateway, :letsencrypt_domains, [])
+    dns = Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
+    Enum.map(http, &to_cert_name/1) ++ dns
   end
+
+  # Certbot stores wildcard certs under the apex domain, e.g. "*.example.com" → "example.com"
+  defp to_cert_name("*." <> apex), do: apex
+  defp to_cert_name(domain), do: domain
 
   defp determine_role(cluster_config) do
     # 1. Check explicit override

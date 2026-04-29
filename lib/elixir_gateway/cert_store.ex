@@ -79,13 +79,23 @@ defmodule ElixirGateway.CertStore do
 
   # — Private —
 
-  # Collects all ETS entries from disk first, then swaps atomically so the
-  # table is never empty during a reload (avoids SNI misses on live traffic).
+  # Upserts new entries and removes stale ones so the table is never empty
+  # during a reload (avoids SNI misses on live traffic).
   defp populate do
-    entries = collect_entries()
-    :ets.delete_all_objects(@table)
-    :ets.insert(@table, entries)
-    Logger.info("CertStore: #{length(entries)} SNI entries loaded")
+    new_entries = collect_entries()
+    new_keys = MapSet.new(new_entries, fn {k, _} -> k end)
+
+    old_keys =
+      :ets.tab2list(@table)
+      |> Enum.map(fn {k, _} -> k end)
+      |> MapSet.new()
+
+    :ets.insert(@table, new_entries)
+
+    MapSet.difference(old_keys, new_keys)
+    |> Enum.each(&:ets.delete(@table, &1))
+
+    Logger.info("CertStore: #{length(new_entries)} SNI entries loaded")
   end
 
   defp collect_entries do
@@ -145,15 +155,20 @@ defmodule ElixirGateway.CertStore do
   end
 
   defp cert_sans(pem_binary) do
-    with [{:Certificate, der, _} | _] <- :public_key.pem_decode(pem_binary),
-         {:OTPCertificate, {:OTPTBSCertificate, _, _, _, _, _, _, _, _, _, extensions}, _, _} <-
-           :public_key.pkix_decode_cert(der, :otp),
-         exts when is_list(exts) <- extensions do
-      for {:Extension, {2, 5, 29, 17}, _, san_list} <- exts,
-          {:dNSName, name} <- san_list do
-        List.to_string(name)
+    try do
+      with [{:Certificate, der, _} | _] <- :public_key.pem_decode(pem_binary),
+           {:OTPCertificate, {:OTPTBSCertificate, _, _, _, _, _, _, _, _, _, extensions}, _, _} <-
+             :public_key.pkix_decode_cert(der, :otp),
+           exts when is_list(exts) <- extensions do
+        for {:Extension, {2, 5, 29, 17}, _, san_list} <- exts,
+            {:dNSName, name} <- san_list do
+          List.to_string(name)
+        end
+      else
+        _ -> []
       end
-    else
+    rescue
+      # pkix_decode_cert raises on malformed DER rather than returning an error tuple
       _ -> []
     end
   end

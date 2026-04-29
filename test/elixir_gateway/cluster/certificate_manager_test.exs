@@ -1,6 +1,8 @@
 defmodule ElixirGateway.Cluster.CertificateManagerTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias ElixirGateway.Cluster.CertificateManager
 
   setup do
@@ -435,5 +437,215 @@ defmodule ElixirGateway.Cluster.CertificateManagerTest do
 
       GenServer.stop(pid)
     end
+  end
+
+  describe "sync_to_new_peer — domain collection" do
+    setup do
+      orig_http = Application.get_env(:elixirgateway, :letsencrypt_domains)
+      orig_dns = Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains)
+
+      on_exit(fn ->
+        restore_env(:letsencrypt_domains, orig_http)
+        restore_env(:letsencrypt_wildcard_domains, orig_dns)
+      end)
+
+      :ok
+    end
+
+    test "emits no warnings when no domains are configured", %{} do
+      Application.put_env(:elixirgateway, :letsencrypt_domains, [])
+      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-sync-no-domains",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:sync_to_new_peer, :"fake@127.0.0.1"})
+          # Synchronous call flushes the mailbox — handle_info has run when this returns
+          CertificateManager.status()
+        end)
+
+      # Nothing to sync → no warnings or errors (debug message is below test log level)
+      assert log == ""
+      assert Process.alive?(pid)
+
+      GenServer.stop(pid)
+    end
+
+    test "attempts all HTTP-01 domains, not just the first", %{live_dir: live_dir} do
+      Application.put_env(:elixirgateway, :letsencrypt_domains, [
+        "api.example.com",
+        "app.example.com"
+      ])
+
+      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
+
+      make_cert(live_dir, "api.example.com")
+      make_cert(live_dir, "app.example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-sync-all-http01",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:sync_to_new_peer, :"fake@127.0.0.1"})
+          CertificateManager.status()
+        end)
+
+      # Both domains appear in failure warnings — neither was skipped
+      # (RPC fails with node_down since fake@127.0.0.1 isn't a real node)
+      assert log =~ "api.example.com"
+      assert log =~ "app.example.com"
+
+      GenServer.stop(pid)
+    end
+
+    test "attempts DNS-01 wildcard cert domains", %{live_dir: live_dir} do
+      Application.put_env(:elixirgateway, :letsencrypt_domains, [])
+      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, ["example.com"])
+
+      make_cert(live_dir, "example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-sync-dns01",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:sync_to_new_peer, :"fake@127.0.0.1"})
+          CertificateManager.status()
+        end)
+
+      assert log =~ "example.com"
+
+      GenServer.stop(pid)
+    end
+
+    test "attempts both HTTP-01 and DNS-01 domains together", %{live_dir: live_dir} do
+      Application.put_env(:elixirgateway, :letsencrypt_domains, ["api.example.com"])
+      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, ["example.com"])
+
+      make_cert(live_dir, "api.example.com")
+      make_cert(live_dir, "example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-sync-both",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:sync_to_new_peer, :"fake@127.0.0.1"})
+          CertificateManager.status()
+        end)
+
+      assert log =~ "api.example.com"
+      assert log =~ "example.com"
+
+      GenServer.stop(pid)
+    end
+
+    test "continues syncing remaining domains when one cert is missing from disk", %{
+      live_dir: live_dir
+    } do
+      Application.put_env(:elixirgateway, :letsencrypt_domains, [
+        "missing.example.com",
+        "api.example.com"
+      ])
+
+      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
+
+      # Only the second domain has a cert on disk
+      make_cert(live_dir, "api.example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-sync-partial",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:sync_to_new_peer, :"fake@127.0.0.1"})
+          CertificateManager.status()
+        end)
+
+      # Both domains appear in warnings — missing cert didn't abort the loop
+      assert log =~ "missing.example.com"
+      assert log =~ "api.example.com"
+      assert Process.alive?(pid)
+
+      GenServer.stop(pid)
+    end
+
+    test "normalizes wildcard entries in HTTP-01 list to apex before reading cert", %{
+      live_dir: live_dir
+    } do
+      # YAML config strips wildcards, but the env-var path could pass them through
+      Application.put_env(:elixirgateway, :letsencrypt_domains, ["*.example.com"])
+      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
+
+      # Cert is stored under the apex, as certbot writes it
+      make_cert(live_dir, "example.com")
+
+      Application.put_env(:elixirgateway, :cluster,
+        enabled: true,
+        secret: String.duplicate("a", 64),
+        node_name: "test-sync-wildcard-normalize",
+        peers: ["peer:9100"]
+      )
+
+      {:ok, pid} = CertificateManager.start_link([])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:sync_to_new_peer, :"fake@127.0.0.1"})
+          CertificateManager.status()
+        end)
+
+      # Failure is node_down (not read_failed:enoent), proving the apex path was used
+      # and the cert was read successfully before the RPC attempt
+      assert log =~ "node_down"
+      refute log =~ "read_failed"
+
+      GenServer.stop(pid)
+    end
+  end
+
+  # — Helpers —
+
+  defp restore_env(key, nil), do: Application.delete_env(:elixirgateway, key)
+  defp restore_env(key, val), do: Application.put_env(:elixirgateway, key, val)
+
+  defp make_cert(live_dir, domain) do
+    cert_dir = Path.join(live_dir, domain)
+    File.mkdir_p!(cert_dir)
+    File.write!(Path.join(cert_dir, "fullchain.pem"), "CERT_#{domain}")
+    File.write!(Path.join(cert_dir, "privkey.pem"), "KEY_#{domain}")
   end
 end
