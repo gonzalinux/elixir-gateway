@@ -234,7 +234,8 @@ Never re-implement role detection inline — always call `ElixirGateway.Cluster.
   - DNS provider credentials live in `dns_providers/` at the project root:
     - `cloudflare.example.ini` — committed template with instructions
     - `cloudflare.ini` — gitignored; copy from the example and set `dns_cloudflare_api_token`
-    - `docker-compose.yml` mounts `./dns_providers/cloudflare.ini` read-only to `/app/certbot/cloudflare.ini` inside the container (the path certbot is configured to read)
+    - `docker-compose.yml` mounts the entire `./dns_providers/` folder read-only to `/app/certbot/dns_providers/` inside the container — adding a new provider file on the host is picked up without changing the compose file
+    - `config/config.exs` sets `cloudflare_credentials: "/app/certbot/dns_providers/cloudflare.ini"`; update this path if a different provider is used
 - **`CertStore`** — ETS-backed SNI lookup table populated from the certbot live directory
   - `populate/0` is non-destructive: upserts new entries then removes stale ones, so the table is never empty during a reload (avoids SNI misses on live traffic)
   - Wildcard certs (`*.example.com`) are stored under the apex (`example.com`) — `sni_fun/1` does a second lookup stripping the first DNS label for wildcard matches
@@ -279,6 +280,47 @@ export CLUSTER_PEERS=""  # Empty, accepts connections
 - `:letsencrypt_domains` — HTTP-01 domains (set via `LETSENCRYPT_DOMAINS` env var or YAML config); wildcards (`*.example.com`) are excluded at config-load time
 - `:letsencrypt_wildcard_domains` — DNS-01 apex domains (set via `LETSENCRYPT_WILDCARD_DOMAINS` or YAML `dns_challenge: true`); certbot stores certs under the apex, e.g. `example.com` for `*.example.com`
 - On peer connect, `CertificateManager` syncs all domains from both lists
+
+#### DDNS Multi-Provider Design
+
+DNS failover domains are configured via `DDNS_DOMAINS` (env var) or the `ddns:` key in `gateway.yaml`. The format is `host:domain:token` for env var, or `record`/`domain`/`token` fields in YAML.
+
+**Provider dispatch is per-domain, keyed on the token/password field:**
+- Token is a literal string `"cloudflare"` → Cloudflare API v4 (`ElixirGateway.Cluster.DDNS.Cloudflare`)
+- Any other value → treated as a Namecheap DDNS password (`ElixirGateway.Cluster.DDNS.Namecheap`)
+
+This means mixed-provider setups are supported in a single `DDNS_DOMAINS` string.
+
+**Cloudflare provider auth:**
+- `CLOUDFLARE_API_SECRET` — API Token with Zone / DNS / Edit permission (Bearer auth)
+- `CLOUDFLARE_API_KEY` — Zone ID (optional; auto-discovered from the domain name if not set)
+
+**Env var examples:**
+```bash
+# Namecheap only
+DDNS_DOMAINS="@:example.com:namecheap-ddns-password"
+
+# Cloudflare only
+DDNS_DOMAINS="@:writeinone.com:cloudflare"
+CLOUDFLARE_API_SECRET="your-api-token"
+
+# Mixed
+DDNS_DOMAINS="@:namecheap-domain.com:ddns-pass,@:cf-domain.com:cloudflare"
+CLOUDFLARE_API_SECRET="your-api-token"
+```
+
+**YAML example:**
+```yaml
+services:
+  mysite:
+    ddns:
+      provider: cloudflare   # or "namecheap"
+      record: "@"
+      domain: "example.com"
+      # token field only needed for namecheap
+```
+
+The `config_loader.ex` `apply_ddns/1` function maps `provider: "cloudflare"` to `%{password: "cloudflare"}` (the sentinel). Never add provider-specific logic outside `ElixirGateway.Cluster.DDNS.*` modules — `DNSFailover` calls `update_all_domains/2` which splits by sentinel and dispatches accordingly.
 
 ### WebSocket Architecture
 - Transparent proxying with session preservation

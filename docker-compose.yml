@@ -17,7 +17,7 @@ services:
     volumes:
       - certs:/etc/elixirgateway/certs
       - logs:/app/logs
-      - ./dns_providers/cloudflare.ini:/app/certbot/cloudflare.ini:ro
+      - ./dns_providers:/app/certbot/dns_providers:ro
     restart: unless-stopped
     stop_grace_period: 60s
     healthcheck:

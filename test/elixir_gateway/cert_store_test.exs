@@ -191,6 +191,8 @@ defmodule ElixirGateway.CertStoreTest do
           Integer.to_string(days),
           "-subj",
           "/CN=#{cn}"
-        ], stderr_to_stdout: true)
+        ],
+        stderr_to_stdout: true
+      )
   end
 end

@@ -103,8 +103,9 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
                 _ ->
                   raise """
                   Invalid DDNS_DOMAINS format: #{entry}
-                  Expected format: host:domain:password
-                  Example: @:example.com:password or api:example.com:password
+                  Expected format: host:domain:token
+                  Namecheap example: @:example.com:namecheap-ddns-password
+                  Cloudflare example: @:example.com:cloudflare
                   """
               end
             end)
@@ -124,7 +125,6 @@ if System.get_env("CLUSTER_ENABLED") == "true" do
 
       [
         enabled: true,
-        provider: :namecheap_ddns,
         public_ip_method: public_ip_method,
         domains: domains,
         failover_timeout: failover_timeout_seconds * 1_000

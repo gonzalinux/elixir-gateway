@@ -147,7 +147,7 @@ config :elixirgateway, :cert_store,
   certbot_work_dir: "/app/certbot/work",
   certbot_logs_dir: "/app/certbot/logs",
   acme_webroot: "/app/certbot/webroot",
-  cloudflare_credentials: "/app/certbot/cloudflare.ini",
+  cloudflare_credentials: "/app/certbot/dns_providers/cloudflare.ini",
   dev_cert_dir: "priv/certs"
 
 config :elixirgateway, env: config_env()

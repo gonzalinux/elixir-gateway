@@ -188,6 +188,15 @@ defmodule ElixirGateway.ConfigLoader do
                   }
                 ]
 
+              "cloudflare" ->
+                [
+                  %{
+                    host: Map.fetch!(ddns, "record"),
+                    domain: Map.fetch!(ddns, "domain"),
+                    password: "cloudflare"
+                  }
+                ]
+
               provider ->
                 Logger.warning(
                   "ConfigLoader: DDNS provider '#{provider}' not yet supported, skipping"
