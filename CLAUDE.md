@@ -293,7 +293,7 @@ This means mixed-provider setups are supported in a single `DDNS_DOMAINS` string
 
 **Cloudflare provider auth:**
 - `CLOUDFLARE_API_SECRET` — API Token with Zone / DNS / Edit permission (Bearer auth)
-- `CLOUDFLARE_API_KEY` — Zone ID (optional; auto-discovered from the domain name if not set)
+- Zone IDs are auto-discovered per domain — no extra config needed
 
 **Env var examples:**
 ```bash

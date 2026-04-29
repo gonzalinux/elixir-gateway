@@ -2,9 +2,10 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
   @moduledoc """
   Cloudflare DDNS client using the Cloudflare API v4.
 
-  Authentication uses two environment variables:
+  Authentication uses one environment variable:
     - CLOUDFLARE_API_SECRET — API Token with Zone / DNS / Edit permission
-    - CLOUDFLARE_API_KEY    — Zone ID (optional; auto-discovered from the domain name if not set)
+
+  Zone IDs are auto-discovered from the domain name via the Cloudflare API.
 
   Domains are identified in DDNS_DOMAINS with the literal token "cloudflare":
     @:writeinone.com:cloudflare
@@ -47,13 +48,7 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
     end
   end
 
-  # Use the zone ID from CLOUDFLARE_API_KEY when set to avoid an extra API lookup.
-  defp resolve_zone(domain, token) do
-    case System.get_env("CLOUDFLARE_API_KEY") do
-      zone_id when zone_id not in [nil, ""] -> {:ok, zone_id}
-      _ -> fetch_zone_id(domain, token)
-    end
-  end
+  defp resolve_zone(domain, token), do: fetch_zone_id(domain, token)
 
   defp fetch_zone_id(domain, token) do
     case Req.get("#{@base_url}/zones", params: [name: domain], headers: auth_headers(token)) do
