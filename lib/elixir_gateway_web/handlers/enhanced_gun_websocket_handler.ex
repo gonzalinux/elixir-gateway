@@ -60,10 +60,9 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
       {:error, reason} ->
         Logger.error("Failed to establish connection: #{inspect(reason)}")
 
-        # Attempt reconnection if configured
         if config.reconnect_max_attempts > 0 do
-          schedule_reconnect(initial_state)
-          {:ok, initial_state}
+          new_state = schedule_reconnect(initial_state)
+          {:ok, new_state}
         else
           {:stop, :normal, initial_state}
         end
@@ -137,12 +136,13 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
         Logger.error("Failed to read response body: #{inspect(reason)}")
     end
 
-    # Return connection to pool and attempt reconnection
     WebSocketConnectionPool.remove_connection(state.target_url, gun_pid)
 
     if should_reconnect?(state) do
-      schedule_reconnect(state)
-      new_state = %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+      new_state =
+        %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+        |> schedule_reconnect()
+
       {:ok, new_state}
     else
       {:stop, {:close, 1002, "Upgrade failed"}, state}
@@ -153,12 +153,13 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   def handle_info({:gun_error, gun_pid, _stream_ref, reason}, state) do
     Logger.error("Gun error: #{inspect(reason)}")
 
-    # Return connection to pool and attempt reconnection
     WebSocketConnectionPool.remove_connection(state.target_url, gun_pid)
 
     if should_reconnect?(state) do
-      schedule_reconnect(state)
-      new_state = %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+      new_state =
+        %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+        |> schedule_reconnect()
+
       {:ok, new_state}
     else
       {:stop, {:close, 1002, "Connection error"}, state}
@@ -201,12 +202,13 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   def handle_info({:gun_down, gun_pid, _protocol, reason, _killed_streams}, state) do
     Logger.error("Gun connection down: #{inspect(reason)}")
 
-    # Remove connection from pool
     WebSocketConnectionPool.remove_connection(state.target_url, gun_pid)
 
     if should_reconnect?(state) do
-      schedule_reconnect(state)
-      new_state = %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+      new_state =
+        %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+        |> schedule_reconnect()
+
       {:ok, new_state}
     else
       {:stop, {:close, 1006, "Connection lost"}, state}
@@ -223,8 +225,10 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
       end
 
       if should_reconnect?(state) do
-        schedule_reconnect(state)
-        new_state = %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+        new_state =
+          %{state | connection_status: :reconnecting, gun_pid: nil, gun_stream_ref: nil}
+          |> schedule_reconnect()
+
         {:ok, new_state}
       else
         {:stop, {:close, 1002, "Upgrade timeout"}, state}
@@ -257,8 +261,8 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
         Logger.error("Reconnection failed: #{inspect(reason)}")
 
         if should_reconnect?(state) do
-          schedule_reconnect(state)
-          {:ok, state}
+          new_state = schedule_reconnect(state)
+          {:ok, new_state}
         else
           {:stop, {:close, 1006, "Reconnection failed"}, state}
         end
