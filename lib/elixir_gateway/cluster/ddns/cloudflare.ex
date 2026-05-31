@@ -10,7 +10,7 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
   Domains are identified in DDNS_DOMAINS with the literal token "cloudflare":
     @:writeinone.com:cloudflare
 
-  Records are created with proxied: false (DNS-only) and a 60-second TTL.
+  Records are updated preserving the existing proxied status; new records default to proxied: false. TTL is set to 60 seconds.
   """
 
   require Logger
@@ -34,8 +34,8 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
   def update(host, domain, ip) do
     with {:ok, token} <- get_token(),
          {:ok, zone_id} <- resolve_zone(domain, token),
-         {:ok, record_id} <- find_record(host, domain, zone_id, token) do
-      upsert_record(record_id, host, domain, zone_id, ip, token)
+         {:ok, record_id, proxied} <- find_record(host, domain, zone_id, token) do
+      upsert_record(record_id, host, domain, zone_id, ip, proxied, token)
     end
   end
 
@@ -73,11 +73,11 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
            params: [type: "A", name: name],
            headers: auth_headers(token)
          ) do
-      {:ok, %{status: 200, body: %{"result" => [%{"id" => id} | _]}}} ->
-        {:ok, id}
+      {:ok, %{status: 200, body: %{"result" => [%{"id" => id, "proxied" => proxied} | _]}}} ->
+        {:ok, id, proxied}
 
       {:ok, %{status: 200, body: %{"result" => []}}} ->
-        {:ok, nil}
+        {:ok, nil, false}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:api_error, status, body}}
@@ -87,8 +87,8 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
     end
   end
 
-  defp upsert_record(nil, host, domain, zone_id, ip, token) do
-    body = record_body(host, domain, ip)
+  defp upsert_record(nil, host, domain, zone_id, ip, proxied, token) do
+    body = record_body(host, domain, ip, proxied)
 
     case Req.post("#{@base_url}/zones/#{zone_id}/dns_records",
            json: body,
@@ -100,8 +100,8 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
     end
   end
 
-  defp upsert_record(record_id, host, domain, zone_id, ip, token) do
-    body = record_body(host, domain, ip)
+  defp upsert_record(record_id, host, domain, zone_id, ip, proxied, token) do
+    body = record_body(host, domain, ip, proxied)
 
     case Req.patch("#{@base_url}/zones/#{zone_id}/dns_records/#{record_id}",
            json: body,
@@ -113,8 +113,8 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
     end
   end
 
-  defp record_body(host, domain, ip) do
-    %{type: "A", name: fqdn(host, domain), content: ip, ttl: 60, proxied: false}
+  defp record_body(host, domain, ip, proxied) do
+    %{type: "A", name: fqdn(host, domain), content: ip, ttl: 60, proxied: proxied}
   end
 
   defp fqdn("@", domain), do: domain
