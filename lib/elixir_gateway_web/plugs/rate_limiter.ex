@@ -6,15 +6,21 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
   import Plug.Conn
   require Logger
 
-  def init(opts), do: opts
-
-  def call(conn, _opts) do
+  def init(opts) do
     rate_limit_config = Application.get_env(:elixirgateway, :gateway)[:rate_limit] || []
     user_requests_per_minute = Keyword.get(rate_limit_config, :user_requests_per_minute, 100)
     ip_requests_per_minute = Keyword.get(rate_limit_config, :ip_requests_per_minute, 500)
 
-    {user_id, ip_address} = get_identifiers(conn)
+    [rate_limit_config: {user_requests_per_minute, ip_requests_per_minute}] ++ opts
+  end
 
+  def call(conn, opts) do
+    {user_requests_per_minute, ip_requests_per_minute} =
+      Keyword.get(opts, :rate_limit_config, {100, 500})
+
+    conn = fetch_cookies(conn)
+    ip_address = get_ip_address(conn)
+    user_id = get_user_identifier(conn, ip_address)
     # Check user-based rate limit first (more restrictive)
     user_bucket = "gateway:user:#{user_id}"
     ip_bucket = "gateway:ip:#{ip_address}"
@@ -59,18 +65,18 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
   end
 
   defp check_rate_limits(user_bucket, ip_bucket, user_limit, ip_limit) do
-    case Hammer.check_rate(user_bucket, 60_000, user_limit) do
+    case ElixirGateway.RateLimit.hit(user_bucket, 60_000, user_limit) do
       {:allow, user_count} ->
-        case Hammer.check_rate(ip_bucket, 60_000, ip_limit) do
+        case ElixirGateway.RateLimit.hit(ip_bucket, 60_000, ip_limit) do
           {:allow, ip_count} ->
             {:allow, user_count, ip_count}
 
-          {:deny, ip_count} ->
-            {:deny, :ip, ip_count}
+          {:deny, _retry_after} ->
+            {:deny, :ip, 0}
         end
 
-      {:deny, user_count} ->
-        {:deny, :user, user_count}
+      {:deny, _retry_after} ->
+        {:deny, :user, 0}
     end
   end
 
@@ -83,50 +89,43 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
     |> halt()
   end
 
-  defp get_identifiers(conn) do
-    user_id = get_user_identifier(conn)
-    ip_address = get_ip_address(conn)
-    {user_id, ip_address}
-  end
-
-  defp get_user_identifier(conn) do
+  defp get_user_identifier(conn, ip_address) do
     cond do
-      # Try X-User-ID header first
-      user_id = get_req_header(conn, "x-user-id") |> List.first() ->
-        user_id
-
-      # Try Authorization header
       auth_header = get_req_header(conn, "authorization") |> List.first() ->
-        # Extract user from JWT or basic auth - simplified for now
-        :crypto.hash(:sha256, auth_header) |> Base.encode16()
+        extract_user_from_auth(auth_header)
 
-      # Fall back to IP-based identifier
+      session_id = get_session_id(conn) ->
+        session_id
+
       true ->
-        get_ip_address(conn)
+        ip_address
     end
   end
+
+  defp extract_user_from_auth(header), do: hash(header)
+
+  defp get_session_id(conn) do
+    Enum.find_value(conn.cookies, fn {name, value} ->
+      if String.ends_with?(name, "_session"), do: hash(value)
+    end)
+  end
+
+  defp hash(value), do: :crypto.hash(:sha256, value) |> Base.encode16()
 
   defp get_ip_address(conn) do
-    case Map.get(conn, :peer_data) do
-      %{address: {a, b, c, d}} ->
-        "#{a}.#{b}.#{c}.#{d}"
+    peer_ip =
+      case Map.get(conn, :peer_data) do
+        %{address: ip} -> ip
+        _ -> conn.remote_ip
+      end
 
-      _ ->
-        # Fallback to remote_ip if peer_data is not available (like in tests)
-        case conn.remote_ip do
-          {a, b, c, d} ->
-            "#{a}.#{b}.#{c}.#{d}"
-
-          _ ->
-            # Hash the request to create a consistent identifier for unknown sources
-            request_hash =
-              :crypto.hash(
-                :sha256,
-                "#{conn.method}#{conn.request_path}#{inspect(conn.req_headers)}"
-              )
-
-            "unknown_" <> Base.encode16(request_hash, case: :lower)
-        end
+    if ElixirGateway.Cluster.DDNS.Cloudflare.proxy_ip?(peer_ip) do
+      get_req_header(conn, "cf-connecting-ip") |> List.first() || format_ip(peer_ip)
+    else
+      format_ip(peer_ip)
     end
   end
+
+  defp format_ip({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
+  defp format_ip(_), do: "unknown"
 end

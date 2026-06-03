@@ -48,6 +48,7 @@ defmodule ElixirGateway.Application do
         {Phoenix.PubSub, name: ElixirGateway.PubSub},
         # Start Finch for HTTP client
         {Finch, name: ElixirGateway.Finch},
+        ElixirGateway.RateLimit,
         # Start WebSocket connection pool
         ElixirGatewayWeb.WebSocketConnectionPool
       ] ++

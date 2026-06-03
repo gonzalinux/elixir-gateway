@@ -131,11 +131,11 @@ defmodule ElixirGatewayWeb.HealthController do
   defp check_rate_limiter do
     # Test rate limiter functionality
     try do
-      case Hammer.check_rate("health_check", 60_000, 1) do
+      case ElixirGateway.RateLimit.hit("health_check", 60_000, 1) do
         {:allow, _count} ->
           %{status: "healthy", message: "Rate limiter functional"}
 
-        {:deny, _count} ->
+        {:deny, _retry_after} ->
           %{status: "healthy", message: "Rate limiter functional (denied as expected)"}
 
         _ ->

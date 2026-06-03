@@ -1,0 +1,81 @@
+# my global config
+global:
+  scrape_interval: 15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: "prometheus"
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+      - targets: ["localhost:9090"]
+        # The label name is added as a label `label_name=<label_value>` to any timeseries scraped from this config.
+        labels:
+          app: "prometheus"
+  - job_name: "seveneat"
+    static_configs:
+      - targets: ["192.168.2.160:8443"]
+        labels:
+          app: "seveneat"
+          deploy: "home"
+  - job_name: "en2feWeb"
+    static_configs:
+      - targets: ["192.168.2.151:4000"]
+        labels:
+          app: "en2feWeb"
+          deploy: "home"
+
+  - job_name: "elixirgateway"
+    static_configs:
+      - targets: ["192.168.2.165:4442"]
+        labels:
+          app: "elixirgateway"
+          deploy: "home"
+  - job_name: "elixirgatewayRemote"
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    authorization:
+      type: Bearer
+      credentials: f72gxNIMYXaLCSFczEUVUPXmyGRTRjQSlg/Hbj3j5HOPPdMhZBdE1eRa1KaS1ZRh
+    static_configs:
+      - targets: ["130.162.168.63:4001"]
+        labels:
+          app: "elixirgateway"
+          deploy: "remote"
+  - job_name: "day20"
+    static_configs:
+      - targets: ["192.168.2.165:3250"]
+        labels:
+          app: "day20"
+          deploy: "home"
+  - job_name: "day20-nginx"
+    static_configs:
+      - targets: ["192.168.2.165:3251"]
+        labels:
+          app: "day20-nginx"
+          deploy: "home"
+  - job_name: "writeInOne"
+    static_configs:
+      - targets: ["192.168.2.160:9001"]
+        labels:
+          app: "writeInOne"
+          deploy: "home"
