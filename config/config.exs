@@ -133,8 +133,22 @@ config :elixirgateway, ElixirGateway.Scheduler,
       schedule: "*/5 * * * *",
       task: {ElixirGateway.Cluster.Jobs.IPChangeDetector, :check_ip_change, []},
       run_strategy: Quantum.RunStrategy.Local
+    ],
+    # Daily cert renewal — certbot skips domains with >30 days remaining
+    cert_renewal: [
+      schedule: "0 2 * * *",
+      task: {ElixirGateway.Cluster.Jobs.CertRenewal, :run, []},
+      run_strategy: Quantum.RunStrategy.Local
     ]
   ]
+
+config :elixirgateway, :cert_store,
+  certbot_config_dir: "/app/certbot/config",
+  certbot_work_dir: "/app/certbot/work",
+  certbot_logs_dir: "/app/certbot/logs",
+  acme_webroot: "/app/certbot/webroot",
+  cloudflare_credentials: "/app/certbot/dns_providers/cloudflare.ini",
+  dev_cert_dir: "priv/certs"
 
 config :elixirgateway, env: config_env()
 

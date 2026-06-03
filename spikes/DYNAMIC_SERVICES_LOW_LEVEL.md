@@ -204,11 +204,18 @@ Handles requests on the internal server.
 `GET /services` (optional, for observability)
 - Return full dynamic registry as JSON. Useful for debugging.
 
+`POST /reload-certs`
+- Calls `CertStore.reload()` to re-read all cert files from disk.
+- Useful for manual cert drops or operational tooling. `CertbotRunner` calls
+  `CertStore.reload()` directly after each certbot run so this endpoint is not
+  needed in normal operation.
+- Response 200: ok.
+
 `POST /custom-domains`
 - Validate required fields: `domain` (string), `service` (string, must match a known
   service name in gateway.yaml or dynamic registry).
 - Add to `CustomDomainRegistry` with `cert_state: "pending"`.
-- Trigger async ACME HTTP-01 cert issuance.
+- Trigger async certbot cert issuance via `CertbotRunner`.
 - Response 200: `{ "domain": "...", "cert_state": "pending" }`.
 - Response 422: validation error.
 
@@ -264,35 +271,39 @@ Reads `Application.get_env(:elixirgateway, :gateway)[:services]` on every reques
 
 Add to the supervision tree (before Endpoint):
 ```
-ElixirGateway.ConfigLoader
+ElixirGateway.ConfigLoader      ← ✅ called synchronously in Application.start/2
+ElixirGateway.CertStore         ← ✅ implemented
+ElixirGateway.CertbotRunner     ← ✅ implemented
 ElixirGateway.DiskPersistence
 ElixirGateway.ServiceRegistry
 ElixirGateway.TransitionScheduler
 ElixirGateway.HealthChecker
 ElixirGateway.CustomDomainRegistry
-ElixirGateway.AcmeClient
-ElixirGateway.CertRenewalScheduler
 ElixirGateway.InternalServer
 ```
 
 Order matters:
 - `ConfigLoader` must start first — all other components read static config from it.
+- `CertStore` must start before `Endpoint` — the SNI callback must be registered before
+  the TLS listener opens, otherwise there is a window where HTTPS connections have no cert.
+- `CertbotRunner` before `CustomDomainRegistry` — custom domain registration triggers
+  certbot immediately via `CertbotRunner`.
 - `DiskPersistence` before `ServiceRegistry` — registry reads disk during its own init.
 - `ServiceRegistry` before `HealthChecker` and `TransitionScheduler`.
-- `AcmeClient` before `CustomDomainRegistry` — registry triggers cert issuance on
-  startup for any domain with `cert_state: "pending"`.
+- `CustomDomainRegistry` before `InternalServer` — the internal API triggers cert
+  issuance via `CustomDomainRegistry` on `POST /custom-domains`.
 
 Revised order:
-1. ConfigLoader (reads gateway.yaml, makes static config available)
-2. DiskPersistence
-3. ServiceRegistry (reads disk in init, then schedules any in-progress transitions)
-4. TransitionScheduler
-5. HealthChecker
-6. AcmeClient
-7. CustomDomainRegistry (reads custom_domains.json, resumes pending cert issuances)
-8. CertRenewalScheduler
+1. ConfigLoader (reads gateway.yaml, makes static config available) ✅
+2. CertStore (loads all cert dirs from disk, registers SNI callback) ✅
+3. CertbotRunner (serial queue for certbot, notifies CertStore + CertificateManager) ✅
+4. DiskPersistence
+5. ServiceRegistry (reads disk in init, then schedules any in-progress transitions)
+6. TransitionScheduler
+7. HealthChecker
+8. CustomDomainRegistry (reads custom_domains.json, resumes pending cert issuances)
 9. InternalServer
-10. ... existing children ...
+10. ... existing children (Scheduler, Cluster.Supervisor) ...
 11. Endpoint
 
 ---
@@ -369,7 +380,9 @@ Optional:
 
 ```
 lib/elixir_gateway/
-  config_loader.ex             ← reads gateway.yaml, ${} substitution, exposes static config
+  config_loader.ex             ← ✅ reads gateway.yaml, ${} substitution, exposes static config
+  cert_store.ex                ← ✅ GenServer + ETS, SNI callback, reads SANs from cert files
+  certbot_runner.ex            ← ✅ wraps certbot CLI via Task queue, calls CertStore.reload()
   services/
     service_registry.ex        ← GenServer + ETS
     transition_scheduler.ex    ← timer management
@@ -378,28 +391,34 @@ lib/elixir_gateway/
     internal_server.ex         ← Bandit listener setup
     internal_controller.ex     ← Plug router + request handling
   custom_domains/
-    custom_domain_registry.ex  ← GenServer + ETS, cert state tracking
-    acme_client.ex             ← ACME v2 HTTP-01 cert issuance via Req
-    cert_renewal_scheduler.ex  ← daily scan, renews certs expiring within 30 days
+    custom_domain_registry.ex  ← GenServer + ETS, cert state tracking, renewal scan built-in
   cluster/
+    jobs/
+      ip_change_detector.ex    ← ✅ existing
+      cert_renewal.ex          ← ✅ daily Quantum job, checks expiry before queuing certbot
     ddns/
-      namecheap.ex             ← existing
-      cloudflare.ex            ← new: Cloudflare DNS A record updater
+      namecheap.ex             ← ✅ existing
+      cloudflare.ex            ← Cloudflare DNS A record updater (needed for writeinone.com)
+
+/app/certbot/config/live/      ← certbot manages ALL certs (HTTP-01 + DNS-01 via Cloudflare plugin)
+  seveneat.com/
+    fullchain.pem
+    privkey.pem
+  en2fe.com/   ...
+  writeinone.com/              ← wildcard cert (covers *.writeinone.com + writeinone.com)
+    fullchain.pem
+    privkey.pem
+  blog.johndoe.com/            ← custom domain, same layout
+    fullchain.pem
+    privkey.pem
+
+priv/certs/                    ← ✅ pre-generated self-signed, committed to repo (dev fallback)
+  cert.pem
+  key.pem
 
 data/
   dynamic_services.json        ← persisted service registry (written at runtime)
   custom_domains.json          ← persisted custom domain registry (written at runtime)
-
-certs/
-  site_encrypt/                ← managed by SiteEncrypt (existing domains, HTTP-01)
-  wildcard/                    ← managed by acme.sh (wildcard certs, DNS-01)
-    writeinone.com/
-      cert.pem
-      key.pem
-  custom/                      ← managed by AcmeClient (per user-domain certs, HTTP-01)
-    blog.johndoe.com/
-      cert.pem
-      key.pem
 ```
 
 ---

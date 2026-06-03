@@ -38,7 +38,6 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
     end
 
     test "forwards POST request with JSON body", %{
-      conn: conn,
       bypass: bypass,
       target_url: target_url
     } do
@@ -64,7 +63,6 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
     end
 
     test "forwards PUT request with form data", %{
-      conn: conn,
       bypass: bypass,
       target_url: target_url
     } do

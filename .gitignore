@@ -12,3 +12,4 @@ erl_crash.dump
 !.env.template
 /priv/gateway.yaml
 gateway.yaml
+/dns_providers/cloudflare.ini

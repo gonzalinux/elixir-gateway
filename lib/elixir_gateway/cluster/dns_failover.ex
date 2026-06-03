@@ -28,6 +28,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   require Logger
 
   alias ElixirGateway.Cluster.DDNS.Namecheap
+  alias ElixirGateway.Cluster.DDNS.Cloudflare
 
   @default_check_interval 5_000
   @default_failover_timeout 5_000
@@ -36,7 +37,6 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     :config,
     :domains,
     :public_ip_method,
-    :provider,
     :check_interval,
     :failover_timeout,
     :last_state,
@@ -78,7 +78,6 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   @impl true
   def init(config) do
     domains = Keyword.get(config, :domains, [])
-    provider = Keyword.get(config, :provider, :namecheap_ddns)
     public_ip_method = Keyword.get(config, :public_ip_method, :auto)
     check_interval = Keyword.get(config, :check_interval, @default_check_interval)
     failover_timeout = Keyword.get(config, :failover_timeout, @default_failover_timeout)
@@ -91,7 +90,6 @@ defmodule ElixirGateway.Cluster.DNSFailover do
       config: config,
       domains: domains,
       public_ip_method: public_ip_method,
-      provider: provider,
       check_interval: check_interval,
       failover_timeout: failover_timeout,
       last_state: :unknown,
@@ -113,7 +111,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     # Schedule first health check
     schedule_health_check(check_interval)
 
-    Logger.info("DNS failover monitor started (provider: #{provider})")
+    Logger.info("DNS failover monitor started")
 
     {:ok, state}
   end
@@ -178,7 +176,6 @@ defmodule ElixirGateway.Cluster.DNSFailover do
       failover_triggered_at: state.failover_triggered_at,
       pending_failover: state.pending_failover_ref != nil,
       domains: state.domains,
-      provider: state.provider,
       cached_public_ip: state.public_ip_cache
     }
 
@@ -265,15 +262,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
         now = System.monotonic_time(:millisecond)
         updated_state = %{state | public_ip_cache: {ip, now}}
 
-        results =
-          case state.provider do
-            :namecheap_ddns ->
-              Namecheap.update_all(state.domains, ip)
-
-            other ->
-              Logger.error("Unsupported DNS provider: #{other}")
-              []
-          end
+        results = update_all_domains(state.domains, ip)
 
         # Check if all updates succeeded
         failures = Enum.filter(results, fn {_domain, _host, result} -> result != :ok end)
@@ -319,8 +308,18 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     end
   end
 
+  # Dispatches each domain to the right provider based on the password sentinel.
+  # password == "cloudflare" → Cloudflare API; anything else → Namecheap DDNS password.
+  defp update_all_domains(domains, ip) do
+    {cf_domains, nc_domains} = Enum.split_with(domains, &(&1.password == "cloudflare"))
+
+    cf_results = if cf_domains != [], do: Cloudflare.update_all(cf_domains, ip), else: []
+    nc_results = if nc_domains != [], do: Namecheap.update_all(nc_domains, ip), else: []
+
+    cf_results ++ nc_results
+  end
+
   defp fetch_public_ip do
-    # Fetch fresh public IP from external service
     Namecheap.get_public_ip()
   end
 
@@ -328,23 +327,5 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     Process.send_after(self(), :check_health, interval)
   end
 
-  def is_primary? do
-    # Check IS_PRIMARY env var or auto-detect from DNS failover configuration
-    case System.get_env("IS_PRIMARY") do
-      "true" ->
-        true
-
-      "false" ->
-        false
-
-      _ ->
-        # Auto-detect: If DNS failover domains are configured, this is the primary
-        # (primary manages DNS updates, typically the home server)
-        # Secondary nodes (cloud) don't manage DNS, they just accept connections
-        cluster_config = Application.get_env(:elixirgateway, :cluster, [])
-        dns_config = Keyword.get(cluster_config, :dns_failover, [])
-        domains = Keyword.get(dns_config, :domains, [])
-        domains != [] and Keyword.get(dns_config, :enabled, false)
-    end
-  end
+  def is_primary?, do: ElixirGateway.Cluster.Role.primary?()
 end

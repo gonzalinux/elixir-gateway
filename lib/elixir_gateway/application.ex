@@ -55,6 +55,12 @@ defmodule ElixirGateway.Application do
         [
           # Start scheduler for periodic tasks (IP change detection, etc.)
           ElixirGateway.Scheduler,
+          # Load TLS certs into ETS before the endpoint starts accepting connections
+          ElixirGateway.CertStore,
+          # Task supervisor for certbot subprocesses (isolates crashes from CertbotRunner)
+          {Task.Supervisor, name: ElixirGateway.CertbotRunner.TaskSupervisor},
+          # Serial queue for certbot invocations (certbot lock file prevents concurrency)
+          ElixirGateway.CertbotRunner,
           # Start to serve requests, typically the last entry
           ElixirGatewayWeb.Endpoint
         ]

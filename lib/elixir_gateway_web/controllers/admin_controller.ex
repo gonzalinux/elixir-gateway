@@ -99,7 +99,6 @@ defmodule ElixirGatewayWeb.AdminController do
           last_state: to_string(s.last_state),
           pending_failover: s.pending_failover,
           domains: domains,
-          provider: to_string(s.provider),
           cached_ip: cached_ip
         }
     end
