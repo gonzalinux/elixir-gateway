@@ -80,16 +80,11 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
   end
 
   defp is_blocked?(ip) do
-    ensure_table_exists()
-
     case :ets.lookup(@table_name, ip) do
       [{^ip, block_until}] ->
-        now = System.system_time(:second)
-
-        if now < block_until do
+        if System.system_time(:second) < block_until do
           true
         else
-          # Block expired, remove it
           :ets.delete(@table_name, ip)
           false
         end
@@ -97,23 +92,14 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
       [] ->
         false
     end
-  rescue
-    ArgumentError -> false
   end
 
   defp record_violation(ip) do
-    ensure_table_exists()
-
     config = Application.get_env(:elixirgateway, :bot_blocker, [])
     block_duration = Keyword.get(config, :block_duration_seconds, 3600)
-
     block_until = System.system_time(:second) + block_duration
-
     :ets.insert(@table_name, {ip, block_until})
-
     Logger.warning("Bot activity detected from IP #{ip}, blocking for #{block_duration}s")
-  rescue
-    ArgumentError -> :ok
   end
 
   defp block_request(conn, ip, reason) do
@@ -142,12 +128,4 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
     end
   end
 
-  defp ensure_table_exists do
-    unless :ets.whereis(@table_name) != :undefined do
-      :ets.new(@table_name, [:set, :public, :named_table, read_concurrency: true])
-    end
-  rescue
-    # Table already exists
-    ArgumentError -> :ok
-  end
 end

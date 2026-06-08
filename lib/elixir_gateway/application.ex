@@ -8,6 +8,7 @@ defmodule ElixirGateway.Application do
   @impl true
   def start(_type, _args) do
     ElixirGateway.ConfigLoader.load()
+    :ets.new(:bot_blocker_ips, [:set, :public, :named_table, read_concurrency: true])
 
     # Filter out notice level logs (typically OTP internals like syn)
     filter_fn = fn log_event, _extra ->
