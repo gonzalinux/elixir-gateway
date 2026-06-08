@@ -25,13 +25,14 @@ defmodule ElixirGateway.Cluster.DDNS.Cloudflare do
                        [first_str, last_str] = String.split(line, " ")
                        {:ok, {a, b, c, d}} = :inet.parse_address(String.to_charlist(first_str))
                        {:ok, {e, f, g, h}} = :inet.parse_address(String.to_charlist(last_str))
-                       {(a <<< 24) ||| (b <<< 16) ||| (c <<< 8) ||| d,
-                        (e <<< 24) ||| (f <<< 16) ||| (g <<< 8) ||| h}
+
+                       {a <<< 24 ||| b <<< 16 ||| c <<< 8 ||| d,
+                        e <<< 24 ||| f <<< 16 ||| g <<< 8 ||| h}
                      end)
 
   @doc "Returns true if the given IPv4 tuple belongs to a Cloudflare proxy range."
   def proxy_ip?({a, b, c, d}) do
-    n = (a <<< 24) ||| (b <<< 16) ||| (c <<< 8) ||| d
+    n = a <<< 24 ||| b <<< 16 ||| c <<< 8 ||| d
     Enum.any?(@cloudflare_ranges, fn {first, last} -> n >= first and n <= last end)
   end
 

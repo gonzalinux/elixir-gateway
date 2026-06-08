@@ -83,14 +83,20 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
       # Make 10 requests from same IP with different users (via distinct Bearer tokens)
       Enum.each(1..10, fn i ->
         conn
-        |> put_req_header("authorization", "Bearer token_#{i}_#{System.unique_integer([:positive])}")
+        |> put_req_header(
+          "authorization",
+          "Bearer token_#{i}_#{System.unique_integer([:positive])}"
+        )
         |> RateLimiter.call(opts)
       end)
 
       # 11th request should be blocked due to IP limit
       conn =
         conn
-        |> put_req_header("authorization", "Bearer token_new_#{System.unique_integer([:positive])}")
+        |> put_req_header(
+          "authorization",
+          "Bearer token_new_#{System.unique_integer([:positive])}"
+        )
         |> RateLimiter.call(opts)
 
       assert conn.halted

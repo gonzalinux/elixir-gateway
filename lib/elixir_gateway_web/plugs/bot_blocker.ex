@@ -127,5 +127,4 @@ defmodule ElixirGatewayWeb.Plugs.BotBlocker do
         end
     end
   end
-
 end
