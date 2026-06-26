@@ -66,26 +66,29 @@ defmodule ElixirGateway.ConfigLoader do
       domain
     end)
     timeout = Map.get(service, "timeout", timeout)
-    paths = Map.get(service, "paths", %{})
-    |> Map.put(".*", %{}) # default matcher
-    |> Enum.map(fn {path, path_config} ->
-      methods =
-      path_config
-      |> Map.put(".*", %{}) # default matcher
-      |> Enum.map(fn {method, config} ->
-        timeout = Map.get(config, "timeout", timeout)
-        Regex.compile(path)
-      end )
 
-    end)
+    path_matchers =
+      Map.get(service, "paths", %{})
+      |> Enum.flat_map(fn {path_pattern, methods_map} ->
+        methods_map
+        |> Enum.map(fn {method, config} ->
+          %{
+            pattern: Regex.compile!(path_pattern),
+            method: method,
+            timeout: Map.get(config, "timeout", timeout)
+          }
+        end)
+      end)
+
+    paths = path_matchers ++ [%{pattern: ~r/.*/, method: ".*", timeout: timeout}]
 
     %ElixirGateway.Service{
-     name: name,
-     target: Map.get(service, "target"),
-     domains: domains,
-     ssl: Map.get(service, "ssl", true),
-     force_https: Map.get(service, "force_https", true),
-     ti
+      name: name,
+      target: Map.get(service, "target"),
+      domains: domains,
+      ssl: Map.get(service, "ssl", true),
+      force_https: Map.get(service, "force_https", true),
+      paths: paths
     }
 
   end
