@@ -25,59 +25,11 @@ defmodule ElixirGateway.ConfigLoader do
       |> substitute_env_vars()
       |> apply_config()
     else
-      Logger.debug("ConfigLoader: no config file found at #{path}, loading from env vars")
-      load_from_env()
-    end
-  end
-
-  def load_from_env do
-    apply_services_from_env()
-    apply_ssl_domains_from_env()
-  end
-
-  defp apply_services_from_env do
-    with services_str when not is_nil(services_str) <- System.get_env("GATEWAY_SERVICES") do
-      services =
-        services_str
-        |> String.split(";", trim: true)
-        |> Enum.map(fn mapping ->
-          case String.split(mapping, "=>", parts: 2) do
-            [host, target] -> {String.trim(host), String.trim(target)}
-            _ -> raise "ConfigLoader: invalid GATEWAY_SERVICES entry: #{mapping}"
-          end
-        end)
-        |> Map.new()
-
-      existing = Application.get_env(:elixirgateway, :gateway, [])
-      Application.put_env(:elixirgateway, :gateway, Keyword.put(existing, :services, services))
-    end
-  end
-
-  defp apply_ssl_domains_from_env do
-    with domains_str when not is_nil(domains_str) <- System.get_env("LETSENCRYPT_DOMAINS") do
-      domains =
-        domains_str
-        |> String.split(",", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
-
-      Application.put_env(:elixirgateway, :letsencrypt_domains, domains)
-    end
-
-    with wildcard_str when not is_nil(wildcard_str) <-
-           System.get_env("LETSENCRYPT_WILDCARD_DOMAINS") do
-      wildcard_domains =
-        wildcard_str
-        |> String.split(",", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
-
-      Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, wildcard_domains)
+      raise "ConfigLoader: no config file found at #{path}, loading from env vars"
     end
   end
 
   # Goes over all the values recursively and replaces env variables.
-
   defp substitute_env_vars(value) when is_binary(value) do
     Regex.replace(~r/\$\{([A-Z0-9_]+)\}/, value, fn _, var_name ->
       System.get_env(var_name) ||
@@ -99,10 +51,43 @@ defmodule ElixirGateway.ConfigLoader do
 
   defp apply_config(config) do
     services = Map.get(config, "services", %{})
-
+    timeout = Map.get(config, "timeout", 30)
+    services
+    |> Enum.map(fn service -> create_service(service, timeout) end)
     apply_services(services)
     apply_ssl_domains(services)
     apply_ddns(services)
+  end
+
+  defp create_service({name, service}, timeout) do
+    domains = Map.get(service, "domains")
+    |> Enum.map(fn entry ->
+      {domain, _dns_challenge} = normalize_domain(entry)
+      domain
+    end)
+    timeout = Map.get(service, "timeout", timeout)
+    paths = Map.get(service, "paths", %{})
+    |> Map.put(".*", %{}) # default matcher
+    |> Enum.map(fn {path, path_config} ->
+      methods =
+      path_config
+      |> Map.put(".*", %{}) # default matcher
+      |> Enum.map(fn {method, config} ->
+        timeout = Map.get(config, "timeout", timeout)
+        Regex.compile(path)
+      end )
+
+    end)
+
+    %ElixirGateway.Service{
+     name: name,
+     target: Map.get(service, "target"),
+     domains: domains,
+     ssl: Map.get(service, "ssl", true),
+     force_https: Map.get(service, "force_https", true),
+     ti
+    }
+
   end
 
   defp apply_services(services) do
