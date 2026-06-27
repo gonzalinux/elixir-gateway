@@ -92,7 +92,7 @@ defmodule ElixirGatewayWeb.HealthController do
   defp check_database do
     # Check if ETS tables are available (used by Hammer for rate limiting)
     try do
-      case :ets.info(:hammer_ets_buckets) do
+      case :ets.info(ElixirGateway.RateLimit) do
         :undefined ->
           %{status: "unhealthy", message: "Rate limiting ETS table not found"}
 
