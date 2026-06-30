@@ -20,83 +20,6 @@ defmodule ElixirGateway.ConfigLoaderTest do
   defp restore_or_delete(key, nil), do: Application.delete_env(:elixirgateway, key)
   defp restore_or_delete(key, value), do: Application.put_env(:elixirgateway, key, value)
 
-  # --- load_from_env/0 ---
-
-  describe "load_from_env/0" do
-    test "parses GATEWAY_SERVICES into services map" do
-      System.put_env(
-        "GATEWAY_SERVICES",
-        "api.example.com=>http://localhost:8080;app.example.com=>http://localhost:3000"
-      )
-
-      on_exit(fn -> System.delete_env("GATEWAY_SERVICES") end)
-
-      ConfigLoader.load_from_env()
-
-      services = Application.get_env(:elixirgateway, :gateway)[:services]
-      assert services["api.example.com"] == "http://localhost:8080"
-      assert services["app.example.com"] == "http://localhost:3000"
-    end
-
-    test "trims whitespace around => and ; in GATEWAY_SERVICES" do
-      System.put_env(
-        "GATEWAY_SERVICES",
-        " api.example.com => http://localhost:8080 ; app.example.com => http://localhost:3000 "
-      )
-
-      on_exit(fn -> System.delete_env("GATEWAY_SERVICES") end)
-
-      ConfigLoader.load_from_env()
-
-      services = Application.get_env(:elixirgateway, :gateway)[:services]
-      assert services["api.example.com"] == "http://localhost:8080"
-    end
-
-    test "parses LETSENCRYPT_DOMAINS into list" do
-      System.put_env("LETSENCRYPT_DOMAINS", "example.com,api.example.com, app.example.com")
-
-      on_exit(fn -> System.delete_env("LETSENCRYPT_DOMAINS") end)
-
-      ConfigLoader.load_from_env()
-
-      domains = Application.get_env(:elixirgateway, :letsencrypt_domains)
-      assert domains == ["example.com", "api.example.com", "app.example.com"]
-    end
-
-    test "does not touch services when GATEWAY_SERVICES is not set" do
-      System.delete_env("GATEWAY_SERVICES")
-
-      Application.put_env(:elixirgateway, :gateway,
-        services: %{"existing.com" => "http://existing"}
-      )
-
-      ConfigLoader.load_from_env()
-
-      assert Application.get_env(:elixirgateway, :gateway)[:services] == %{
-               "existing.com" => "http://existing"
-             }
-    end
-
-    test "does not touch letsencrypt_domains when LETSENCRYPT_DOMAINS is not set" do
-      System.delete_env("LETSENCRYPT_DOMAINS")
-      Application.put_env(:elixirgateway, :letsencrypt_domains, ["pre-existing.com"])
-
-      ConfigLoader.load_from_env()
-
-      assert Application.get_env(:elixirgateway, :letsencrypt_domains) == ["pre-existing.com"]
-    end
-
-    test "raises on invalid GATEWAY_SERVICES format" do
-      System.put_env("GATEWAY_SERVICES", "invalid-entry-without-arrow")
-
-      on_exit(fn -> System.delete_env("GATEWAY_SERVICES") end)
-
-      assert_raise RuntimeError, ~r/invalid GATEWAY_SERVICES entry/, fn ->
-        ConfigLoader.load_from_env()
-      end
-    end
-  end
-
   # --- YAML loading ---
 
   describe "load/0 from YAML file" do
@@ -282,19 +205,92 @@ defmodule ElixirGateway.ConfigLoaderTest do
       assert [%{host: "@", domain: "myapp.com", password: "secret123"}] = domains
     end
 
-    test "falls back to load_from_env when file does not exist" do
+    test "raises when the config file does not exist" do
       System.put_env("GATEWAY_CONFIG_FILE", "/nonexistent/path/gateway.yaml")
-      System.put_env("GATEWAY_SERVICES", "fallback.com=>http://localhost:1234")
+      on_exit(fn -> System.delete_env("GATEWAY_CONFIG_FILE") end)
+
+      assert_raise RuntimeError, ~r/no config file found/, fn ->
+        ConfigLoader.load()
+      end
+    end
+  end
+
+  # --- timeouts ---
+
+  describe "load/0 timeout resolution" do
+    setup do
+      path =
+        Path.join(System.tmp_dir!(), "gateway_test_#{System.unique_integer([:positive])}.yaml")
+
+      System.put_env("GATEWAY_CONFIG_FILE", path)
 
       on_exit(fn ->
         System.delete_env("GATEWAY_CONFIG_FILE")
-        System.delete_env("GATEWAY_SERVICES")
+        File.rm(path)
       end)
+
+      {:ok, path: path}
+    end
+
+    test "falls back to the global default timeout", %{path: path} do
+      File.write!(path, """
+      timeout: 12
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - myapp.com
+          ssl: false
+      """)
 
       ConfigLoader.load()
 
-      services = Application.get_env(:elixirgateway, :gateway)[:services]
-      assert services["fallback.com"] == "http://localhost:1234"
+      [%{timeout: timeout}] =
+        Application.get_env(:elixirgateway, :gateway)[:timeouts]["myapp.com"]
+
+      assert timeout == 12
+    end
+
+    test "service-level timeout overrides the global default", %{path: path} do
+      File.write!(path, """
+      timeout: 12
+      services:
+        myapp:
+          timeout: 5
+          target: http://localhost:4000
+          domains:
+            - myapp.com
+          ssl: false
+      """)
+
+      ConfigLoader.load()
+
+      [%{timeout: timeout}] =
+        Application.get_env(:elixirgateway, :gateway)[:timeouts]["myapp.com"]
+
+      assert timeout == 5
+    end
+
+    test "path-level timeout overrides the service-level default", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          timeout: 5
+          target: http://localhost:4000
+          domains:
+            - myapp.com
+          ssl: false
+          paths:
+            "/uploads":
+              POST:
+                timeout: 60
+      """)
+
+      ConfigLoader.load()
+
+      matchers = Application.get_env(:elixirgateway, :gateway)[:timeouts]["myapp.com"]
+
+      assert [%{method: "POST", timeout: 60}, %{method: ".*", timeout: 5}] = matchers
     end
   end
 end

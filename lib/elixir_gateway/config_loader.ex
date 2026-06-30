@@ -51,46 +51,12 @@ defmodule ElixirGateway.ConfigLoader do
 
   defp apply_config(config) do
     services = Map.get(config, "services", %{})
-    timeout = Map.get(config, "timeout", 30)
-    services
-    |> Enum.map(fn service -> create_service(service, timeout) end)
+    default_timeout = Map.get(config, "timeout", 30)
+
     apply_services(services)
     apply_ssl_domains(services)
     apply_ddns(services)
-  end
-
-  defp create_service({name, service}, timeout) do
-    domains = Map.get(service, "domains")
-    |> Enum.map(fn entry ->
-      {domain, _dns_challenge} = normalize_domain(entry)
-      domain
-    end)
-    timeout = Map.get(service, "timeout", timeout)
-
-    path_matchers =
-      Map.get(service, "paths", %{})
-      |> Enum.flat_map(fn {path_pattern, methods_map} ->
-        methods_map
-        |> Enum.map(fn {method, config} ->
-          %{
-            pattern: Regex.compile!(path_pattern),
-            method: method,
-            timeout: Map.get(config, "timeout", timeout)
-          }
-        end)
-      end)
-
-    paths = path_matchers ++ [%{pattern: ~r/.*/, method: ".*", timeout: timeout}]
-
-    %ElixirGateway.Service{
-      name: name,
-      target: Map.get(service, "target"),
-      domains: domains,
-      ssl: Map.get(service, "ssl", true),
-      force_https: Map.get(service, "force_https", true),
-      paths: paths
-    }
-
+    apply_timeouts(services, default_timeout)
   end
 
   defp apply_services(services) do
@@ -208,6 +174,51 @@ defmodule ElixirGateway.ConfigLoader do
 
       Logger.debug("ConfigLoader: loaded #{length(ddns_domains)} DDNS entries")
     end
+  end
+
+  # Builds a host-keyed map of path matchers (regex + method + timeout), mirroring
+  # apply_services so DomainRouter can resolve a timeout the same way it resolves a target.
+  defp apply_timeouts(services, default_timeout) do
+    timeouts_map =
+      services
+      |> Enum.flat_map(fn {_name, service} ->
+        timeout = Map.get(service, "timeout", default_timeout)
+        path_matchers = build_path_matchers(service, timeout)
+
+        service
+        |> Map.get("domains", [])
+        |> Enum.map(fn entry ->
+          {name, _dns_challenge} = normalize_domain(entry)
+
+          case name do
+            "default" -> {"default_any", path_matchers}
+            _ -> {name, path_matchers}
+          end
+        end)
+      end)
+      |> Map.new()
+
+    existing = Application.get_env(:elixirgateway, :gateway, [])
+    Application.put_env(:elixirgateway, :gateway, Keyword.put(existing, :timeouts, timeouts_map))
+
+    Logger.debug("ConfigLoader: loaded timeouts for #{map_size(timeouts_map)} hosts")
+  end
+
+  defp build_path_matchers(service, default_timeout) do
+    path_matchers =
+      service
+      |> Map.get("paths", %{})
+      |> Enum.flat_map(fn {path_pattern, methods_map} ->
+        Enum.map(methods_map, fn {method, path_config} ->
+          %{
+            pattern: Regex.compile!(path_pattern),
+            method: method,
+            timeout: Map.get(path_config, "timeout", default_timeout)
+          }
+        end)
+      end)
+
+    path_matchers ++ [%{pattern: ~r/.*/, method: ".*", timeout: default_timeout}]
   end
 
   # Domain entries can be a plain string or a map with name + optional dns_challenge flag.
