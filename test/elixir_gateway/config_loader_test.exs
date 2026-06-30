@@ -205,13 +205,20 @@ defmodule ElixirGateway.ConfigLoaderTest do
       assert [%{host: "@", domain: "myapp.com", password: "secret123"}] = domains
     end
 
-    test "raises when the config file does not exist" do
+    test "leaves existing gateway config unchanged when the config file does not exist" do
       System.put_env("GATEWAY_CONFIG_FILE", "/nonexistent/path/gateway.yaml")
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"existing.com" => "http://existing"}
+      )
+
       on_exit(fn -> System.delete_env("GATEWAY_CONFIG_FILE") end)
 
-      assert_raise RuntimeError, ~r/no config file found/, fn ->
-        ConfigLoader.load()
-      end
+      ConfigLoader.load()
+
+      assert Application.get_env(:elixirgateway, :gateway)[:services] == %{
+               "existing.com" => "http://existing"
+             }
     end
   end
 

@@ -3,8 +3,12 @@ defmodule ElixirGateway.ConfigLoader do
   Loads gateway configuration from a YAML file and populates Application env.
 
   Reads from the path in GATEWAY_CONFIG_FILE env var, falling back to
-  priv/gateway.yaml. If neither exists, does nothing and existing env var
-  config continues to work unchanged.
+  priv/gateway.yaml. If neither exists, logs an error and leaves whatever
+  :gateway config is already in place (the config/*.exs compile-time
+  defaults, e.g. config/test.exs in the test env) unchanged — this is what
+  lets `mix test` boot without a real gateway.yaml on disk. In production a
+  missing file is a real misconfiguration, so it's logged at :error so it
+  surfaces in the JSON log pipeline, even though the process doesn't crash.
 
   Supports ${VAR_NAME} substitution in any string value. Startup fails
   with a clear error if a referenced env var is not set.
@@ -25,7 +29,9 @@ defmodule ElixirGateway.ConfigLoader do
       |> substitute_env_vars()
       |> apply_config()
     else
-      raise "ConfigLoader: no config file found at #{path}, loading from env vars"
+      Logger.error(
+        "ConfigLoader: no config file found at #{path}, keeping existing gateway config"
+      )
     end
   end
 
