@@ -9,9 +9,12 @@
 # This file replaces GATEWAY_SERVICES, LETSENCRYPT_DOMAINS, and DDNS_DOMAINS
 # env vars. All other env vars (rate limits, cluster config, etc.) are unchanged.
 
+# Default request timeout in seconds, applied to any path/method without a
+# more specific override. Can be overridden per-service or per-path below.
+timeout: 30
 services:
-
   service1:
+    timeout: 3.5
     target: http://localhost:8080
     domains:
       - "*.service1.com"
@@ -22,6 +25,11 @@ services:
       record: "@"
       domain: service1.com
       token: "${SEVENEAT_DDNS_TOKEN}"
+    paths:
+      "/whatever/other":
+        POST:
+          timeout: 30
+
 
   service2:
     target: http://192.168.2.151:4000

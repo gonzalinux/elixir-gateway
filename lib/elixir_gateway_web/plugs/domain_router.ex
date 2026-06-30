@@ -6,6 +6,8 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
   import Plug.Conn
   require Logger
 
+  @default_timeout 30
+
   def init(opts), do: opts
 
   def call(conn, _opts) do
@@ -25,6 +27,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
         |> assign(:target_url, target_url)
         |> assign(:original_host, host)
         |> assign(:force_https, force_https?(host))
+        |> assign(:timeout, resolve_timeout(host, conn.method, conn.request_path))
     end
   end
 
@@ -48,6 +51,32 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
     Map.get(force_https_map, host) ||
       find_wildcard_match(force_https_map, host) ||
       false
+  end
+
+  defp resolve_timeout(host, method, path) do
+    timeouts = Application.get_env(:elixirgateway, :gateway)[:timeouts] || %{}
+
+    path_matchers =
+      Map.get(timeouts, host) ||
+        find_wildcard_match(timeouts, host) ||
+        if(host != "default", do: Map.get(timeouts, "default_any"))
+
+    case path_matchers do
+      nil -> @default_timeout
+      matchers -> find_timeout(matchers, method, path)
+    end
+  end
+
+  defp find_timeout(matchers, method, path) do
+    Enum.find_value(matchers, @default_timeout, fn %{
+                                                     pattern: pattern,
+                                                     method: m,
+                                                     timeout: timeout
+                                                   } ->
+      if Regex.match?(pattern, path) and (m == ".*" or String.upcase(m) == String.upcase(method)) do
+        timeout
+      end
+    end)
   end
 
   defp find_wildcard_match(services, host) do

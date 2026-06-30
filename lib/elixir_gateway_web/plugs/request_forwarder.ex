@@ -8,6 +8,8 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
   alias ElixirGateway.Cluster.Config
 
+  @default_timeout_seconds 30
+
   def init(opts), do: opts
 
   def call(conn, opts) do
@@ -62,6 +64,9 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   defp forward_to_remote_node(conn, node) do
     start_time = System.monotonic_time()
 
+    timeout_seconds = conn.assigns[:timeout] || @default_timeout_seconds
+    timeout_ms = round(timeout_seconds * 1000)
+
     # Serialize request data for RPC call
     request_data = %{
       method: conn.method,
@@ -70,11 +75,12 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       headers: conn.req_headers,
       body: get_request_body(conn),
       target_url: conn.assigns[:target_url],
-      original_host: conn.assigns[:original_host]
+      original_host: conn.assigns[:original_host],
+      timeout_ms: timeout_ms
     }
 
-    # Forward via RPC with 45s timeout (allows for 40s backend timeout)
-    case rpc_call(node, {:execute_forwarded_request, request_data}, 45_000) do
+    # Forward via RPC with a 5s buffer on top of the backend request timeout
+    case rpc_call(node, {:execute_forwarded_request, request_data}, timeout_ms + 5_000) do
       {:ok, status, headers, body} ->
         # Record successful forwarded request
         if Config.load_distribution_enabled?() do
@@ -152,9 +158,11 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
             request_data.body
           )
 
+        timeout_ms = Map.get(request_data, :timeout_ms, @default_timeout_seconds * 1000)
+
         case Finch.request(finch_request, ElixirGateway.Finch,
-               receive_timeout: 40_000,
-               request_timeout: 40_000
+               receive_timeout: timeout_ms,
+               request_timeout: timeout_ms
              ) do
           {:ok, response} ->
             Logger.info("RPC forwarded request succeeded: #{response.status}")
@@ -208,10 +216,12 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       finch_request = Finch.build(method, full_url, headers, body)
       Logger.info("Built Finch request, executing...")
 
-      # Execute request with timeout for large file uploads
+      timeout_ms = round((conn.assigns[:timeout] || @default_timeout_seconds) * 1000)
+
+      # Execute request with the per-service/per-path configured timeout
       case Finch.request(finch_request, ElixirGateway.Finch,
-             receive_timeout: 40_000,
-             request_timeout: 40_000
+             receive_timeout: timeout_ms,
+             request_timeout: timeout_ms
            ) do
         {:ok, response} ->
           duration = System.monotonic_time() - start_time
