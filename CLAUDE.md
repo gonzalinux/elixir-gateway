@@ -44,11 +44,12 @@ Internet → Bot Blocker → Rate Limiter → WebSocket Upgrade Check → Domain
   - Traffic threshold detection (routes locally below 20 req/min)
   - Dynamic adjustment when nodes connect/disconnect
 - **`RequestForwarder`** - Forwards HTTP requests using Finch client
+  - Streams request bodies to the backend (1MB chunks, 15-second timeout per chunk) instead of buffering them whole; bodies that fit in a single chunk are still sent as a plain binary
+  - Streams backend responses to the client chunk by chunk (`Finch.stream/5` + `send_chunked`/`chunk`); empty responses (e.g. 204) are sent in one shot without chunked encoding
   - Supports large file uploads up to 20MB
-  - Chunked reading (1MB chunks) with 15-second timeout per chunk
   - Multipart form data handling
   - Extended timeouts (40 seconds for large transfers)
-  - RPC forwarding to remote nodes when load distribution is enabled
+  - RPC forwarding to remote nodes when load distribution is enabled (this path still buffers the full body, as it must be serialized over Erlang RPC)
 - **`WebSocketUpgradePlug`** - Detects and handles WebSocket upgrade requests
 - **`MetricsAuthPlug`** - Protects `/metrics` endpoint with authentication
 
