@@ -312,6 +312,85 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
 
       assert conn.status == 200
     end
+
+    test "streams large request bodies without buffering them whole", %{
+      bypass: bypass,
+      target_url: target_url
+    } do
+      # Bigger than the 20MB per-read limit so the plug is forced to take
+      # the streamed body path (Plug's test adapter caps each read at :length)
+      body_size = 21 * 1024 * 1024
+      large_body = :crypto.strong_rand_bytes(body_size)
+
+      Bypass.expect_once(bypass, "POST", "/api/big-upload", fn conn ->
+        {:ok, received, conn} = read_full_body(conn, "")
+        assert byte_size(received) == body_size
+        assert received == large_body
+
+        Plug.Conn.resp(conn, 200, "uploaded")
+      end)
+
+      conn =
+        Plug.Test.conn(:post, "/api/big-upload", large_body)
+        |> assign(:target_url, target_url)
+        |> assign(:original_host, "api.example.com")
+        |> put_req_header("content-type", "application/octet-stream")
+        |> RequestForwarder.call([])
+
+      assert conn.status == 200
+      assert conn.halted
+    end
+
+    test "streams large responses to the client in chunks", %{
+      bypass: bypass,
+      target_url: target_url
+    } do
+      large_body = :crypto.strong_rand_bytes(5 * 1024 * 1024)
+
+      Bypass.expect_once(bypass, "GET", "/api/big-download", fn conn ->
+        Plug.Conn.resp(conn, 200, large_body)
+      end)
+
+      conn =
+        Plug.Test.conn(:get, "/api/big-download")
+        |> assign(:target_url, target_url)
+        |> assign(:original_host, "api.example.com")
+        |> RequestForwarder.call([])
+
+      assert conn.status == 200
+      assert conn.halted
+      # The response was delivered via send_chunked/chunk (state :chunked),
+      # not buffered and sent with send_resp
+      assert conn.state == :chunked
+      assert conn.resp_body == large_body
+    end
+
+    test "sends empty responses without chunked encoding", %{
+      bypass: bypass,
+      target_url: target_url
+    } do
+      Bypass.expect_once(bypass, "GET", "/api/empty", fn conn ->
+        Plug.Conn.resp(conn, 204, "")
+      end)
+
+      conn =
+        Plug.Test.conn(:get, "/api/empty")
+        |> assign(:target_url, target_url)
+        |> assign(:original_host, "api.example.com")
+        |> RequestForwarder.call([])
+
+      assert conn.status == 204
+      assert conn.halted
+      assert conn.state == :sent
+      assert conn.resp_body == ""
+    end
+  end
+
+  defp read_full_body(conn, acc) do
+    case Plug.Conn.read_body(conn, length: 8_000_000) do
+      {:ok, chunk, conn} -> {:ok, acc <> chunk, conn}
+      {:more, chunk, conn} -> read_full_body(conn, acc <> chunk)
+    end
   end
 
   describe "URL building" do
