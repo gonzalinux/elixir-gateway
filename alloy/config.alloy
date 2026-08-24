@@ -1,7 +1,8 @@
 // Grafana Alloy config — tails JSON logs from elixir-gateway and forwards to a Loki-compatible aggregator
 
 local.file_match "gateway" {
-  path_targets = [{"__path__" = "/app/logs/app.json.log"}]
+  // Match base file and OTP-rotated files (.0, .1, .2)
+  path_targets = [{"__path__" = "/app/logs/app.json.log*"}]
 }
 
 loki.source.file "gateway" {
