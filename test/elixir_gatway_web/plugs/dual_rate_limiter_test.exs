@@ -212,4 +212,75 @@ defmodule ElixirGatewayWeb.Plugs.DualRateLimiterTest do
       assert get_resp_header(conn, "x-ratelimit-ip-remaining") == ["9"]
     end
   end
+
+  describe "bypass token" do
+    setup do
+      original_token = Application.get_env(:elixirgateway, :rate_limit_bypass_token)
+
+      on_exit(fn ->
+        if original_token do
+          Application.put_env(:elixirgateway, :rate_limit_bypass_token, original_token)
+        else
+          Application.delete_env(:elixirgateway, :rate_limit_bypass_token)
+        end
+      end)
+
+      :ok
+    end
+
+    test "skips rate limiting when a valid token is provided", %{conn: conn, opts: opts} do
+      Application.put_env(:elixirgateway, :rate_limit_bypass_token, "secret-token")
+
+      base = System.unique_integer([:positive])
+      unique_ip = {10, 7, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
+
+      conn_with_ip = Map.put(conn, :peer_data, %{address: unique_ip})
+
+      # Exceed the configured user limit (5) using the bypass token; none of
+      # these requests should be denied or hit rate-limit headers.
+      for _ <- 1..10 do
+        result =
+          conn_with_ip
+          |> put_req_header("x-ratelimit-bypass-token", "secret-token")
+          |> RateLimiter.call(opts)
+
+        refute result.halted
+        assert get_resp_header(result, "x-ratelimit-user-limit") == []
+      end
+    end
+
+    test "does not bypass when the token is missing or wrong", %{conn: conn, opts: opts} do
+      Application.put_env(:elixirgateway, :rate_limit_bypass_token, "secret-token")
+
+      base = System.unique_integer([:positive])
+      unique_ip = {10, 8, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
+
+      conn_with_ip = Map.put(conn, :peer_data, %{address: unique_ip})
+
+      result =
+        conn_with_ip
+        |> put_req_header("x-ratelimit-bypass-token", "wrong-token")
+        |> RateLimiter.call(opts)
+
+      refute result.halted
+      assert get_resp_header(result, "x-ratelimit-user-limit") == ["5"]
+    end
+
+    test "bypass header is ignored when no token is configured", %{conn: conn, opts: opts} do
+      Application.delete_env(:elixirgateway, :rate_limit_bypass_token)
+
+      base = System.unique_integer([:positive])
+      unique_ip = {10, 9, rem(base, 254) + 1, rem(div(base, 256), 254) + 1}
+
+      conn_with_ip = Map.put(conn, :peer_data, %{address: unique_ip})
+
+      result =
+        conn_with_ip
+        |> put_req_header("x-ratelimit-bypass-token", "anything")
+        |> RateLimiter.call(opts)
+
+      refute result.halted
+      assert get_resp_header(result, "x-ratelimit-user-limit") == ["5"]
+    end
+  end
 end
