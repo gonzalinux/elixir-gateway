@@ -207,6 +207,10 @@ end
 - User identification priority: `X-User-ID` header → Authorization header hash → IP address
 - Returns proper HTTP 429 responses with rate limit headers
 - Configurable limits with cleanup intervals
+- **Bypass token** (optional, for load testing): set `RATE_LIMIT_BYPASS_TOKEN`; requests sending
+  that value in the `x-ratelimit-bypass-token` header skip rate limiting entirely (compared with
+  `Plug.Crypto.secure_compare/2`, usage logged). Unset by default — do not set it in production
+  unless intentionally load testing against it.
 
 ### SSL/TLS Management
 - **SiteEncrypt** integration for automatic Let's Encrypt certificates

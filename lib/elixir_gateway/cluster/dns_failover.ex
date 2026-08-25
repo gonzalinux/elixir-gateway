@@ -130,7 +130,7 @@ defmodule ElixirGateway.Cluster.DNSFailover do
   def handle_info(:execute_failover, state) do
     # Re-check cluster health before executing failover
     # (in case it recovered during the timeout period)
-    cluster_healthy = ElixirGateway.Cluster.Manager.cluster_healthy?()
+    cluster_healthy = safe_cluster_healthy?()
 
     if cluster_healthy do
       Logger.info("Cluster recovered during failover timeout, cancelling DNS update")
@@ -216,8 +216,19 @@ defmodule ElixirGateway.Cluster.DNSFailover do
 
   ## Private Functions
 
+  # Cluster.Manager can block on Node.connect/1 while retrying an unreachable
+  # peer, which can stall this GenServer.call past its timeout. Treat that as
+  # "not healthy" instead of crashing this process.
+  defp safe_cluster_healthy? do
+    ElixirGateway.Cluster.Manager.cluster_healthy?()
+  catch
+    :exit, reason ->
+      Logger.warning("Cluster.Manager health check failed: #{inspect(reason)}")
+      false
+  end
+
   defp perform_health_check(state) do
-    cluster_healthy = ElixirGateway.Cluster.Manager.cluster_healthy?()
+    cluster_healthy = safe_cluster_healthy?()
 
     cond do
       # Cluster was healthy, now unhealthy - schedule delayed failover
