@@ -9,6 +9,9 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   alias ElixirGateway.Cluster.Config
 
   @default_timeout_seconds 30
+  @max_body_length 20_000_000
+  @body_read_length 1_000_000
+  @body_read_timeout 15_000
 
   def init(opts), do: opts
 
@@ -204,35 +207,31 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
       # Prepare headers (exclude hop-by-hop headers)
       headers = prepare_headers(conn)
-      Logger.info("Request headers: #{inspect(headers)}")
 
-      # Get request body - either from parsed params or raw body
-      Logger.info("Getting request body...")
-      body = get_request_body(conn)
-      Logger.info("Body retrieved, length: #{byte_size(body)} bytes")
+      # Stream the request body instead of buffering it whole in memory.
+      # Small bodies (single chunk) are still sent as a plain binary.
+      body = request_body(conn)
+      headers = maybe_forward_content_length(headers, conn, body)
 
       # Build Finch request
       method = String.upcase(conn.method)
       finch_request = Finch.build(method, full_url, headers, body)
-      Logger.info("Built Finch request, executing...")
 
       timeout_ms = round((conn.assigns[:timeout] || @default_timeout_seconds) * 1000)
 
-      # Execute request with the per-service/per-path configured timeout
-      case Finch.request(finch_request, ElixirGateway.Finch,
-             receive_timeout: timeout_ms,
-             request_timeout: timeout_ms
-           ) do
-        {:ok, response} ->
+      # Stream the backend response to the client chunk by chunk
+      case stream_backend_request(finch_request, conn, timeout_ms) do
+        {:ok, conn, status} ->
           duration = System.monotonic_time() - start_time
-          log_request(conn, response.status, duration)
+          log_request(conn, status, duration)
+          halt(conn)
 
-          conn
-          |> put_response_headers(response.headers)
-          |> send_resp(response.status, response.body)
-          |> halt()
+        {:closed, conn, status} ->
+          duration = System.monotonic_time() - start_time
+          log_request(conn, status || 499, duration)
+          halt(conn)
 
-        {:error, reason} ->
+        {:error, reason, conn} ->
           duration = System.monotonic_time() - start_time
           Logger.error("Request forwarding failed: #{inspect(reason)}")
           log_request(conn, 502, duration)
@@ -253,6 +252,144 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         |> send_resp(500, Jason.encode!(%{error: "Internal server error"}))
         |> halt()
     end
+  end
+
+  # Reads the first body chunk eagerly. Bodies that fit in a single chunk
+  # are sent as a plain binary (Finch sets content-length automatically);
+  # larger bodies are streamed chunk by chunk without buffering them whole.
+  defp request_body(conn) do
+    case read_body_chunk(conn) do
+      {:ok, "", _conn} ->
+        ""
+
+      {:ok, chunk, _conn} ->
+        chunk
+
+      {:more, chunk, conn} ->
+        {:stream, Stream.concat([chunk], request_body_stream(conn))}
+
+      {:error, reason} ->
+        raise "failed to read request body: #{inspect(reason)}"
+    end
+  end
+
+  defp request_body_stream(conn) do
+    Stream.unfold({:continue, conn}, fn
+      :done ->
+        nil
+
+      {:continue, conn} ->
+        case read_body_chunk(conn) do
+          {:ok, "", _conn} ->
+            nil
+
+          {:ok, chunk, _conn} ->
+            {chunk, :done}
+
+          {:more, chunk, conn} ->
+            {chunk, {:continue, conn}}
+
+          {:error, reason} ->
+            raise "failed to read request body: #{inspect(reason)}"
+        end
+    end)
+  end
+
+  defp read_body_chunk(conn) do
+    Plug.Conn.read_body(conn,
+      length: @max_body_length,
+      read_length: @body_read_length,
+      read_timeout: @body_read_timeout
+    )
+  end
+
+  # When streaming the body, forward the original content-length so the
+  # backend receives a fixed-size body (otherwise Mint falls back to
+  # chunked transfer-encoding).
+  defp maybe_forward_content_length(headers, conn, {:stream, _stream}) do
+    case get_req_header(conn, "content-length") do
+      [content_length | _] -> [{"content-length", content_length} | headers]
+      [] -> headers
+    end
+  end
+
+  defp maybe_forward_content_length(headers, _conn, _body), do: headers
+
+  # Streams the backend response to the client as it arrives.
+  #
+  # Returns:
+  # - `{:ok, conn, status}` when the full response was proxied
+  # - `{:closed, conn, status}` when the response started but could not be
+  #   completed (client disconnected or backend stream interrupted); no
+  #   further response can be sent on this connection
+  # - `{:error, reason, conn}` when the request failed before any part of
+  #   the response was sent
+  defp stream_backend_request(finch_request, conn, timeout_ms) do
+    initial_acc = %{conn: conn, status: nil, headers: [], chunked: false}
+
+    try do
+      case Finch.stream(finch_request, ElixirGateway.Finch, initial_acc, &handle_response_event/2,
+             receive_timeout: timeout_ms,
+             request_timeout: timeout_ms
+           ) do
+        {:ok, %{chunked: true, conn: conn, status: status}} ->
+          {:ok, conn, status}
+
+        {:ok, %{conn: conn, status: status, headers: headers}} ->
+          # The backend responded without a body (e.g. 204); reply in one shot
+          status = status || 200
+
+          conn =
+            conn
+            |> put_response_headers(headers)
+            |> send_resp(status, "")
+
+          {:ok, conn, status}
+
+        {:error, reason, %{chunked: true, conn: conn, status: status}} ->
+          Logger.error("Backend stream interrupted mid-response: #{inspect(reason)}")
+          {:closed, conn, status}
+
+        {:error, reason, %{conn: conn}} ->
+          {:error, reason, conn}
+      end
+    catch
+      {:client_disconnected, conn} -> {:closed, conn, nil}
+    end
+  end
+
+  defp handle_response_event({:status, status}, acc) do
+    %{acc | status: status}
+  end
+
+  defp handle_response_event({:headers, headers}, acc) do
+    %{acc | headers: headers}
+  end
+
+  defp handle_response_event({:data, data}, acc) do
+    acc = ensure_response_started(acc)
+
+    case chunk(acc.conn, data) do
+      {:ok, conn} ->
+        %{acc | conn: conn}
+
+      {:error, :closed} ->
+        throw({:client_disconnected, acc.conn})
+    end
+  end
+
+  # Ignore trailers and other events
+  defp handle_response_event(_event, acc), do: acc
+
+  defp ensure_response_started(%{chunked: true} = acc), do: acc
+
+  defp ensure_response_started(%{conn: conn, status: status, headers: headers} = acc) do
+    conn =
+      conn
+      |> put_response_headers(headers)
+      |> send_chunked(status)
+
+    %{acc | conn: conn, chunked: true}
   end
 
   defp build_target_url(base_url, path, query_string) do
@@ -322,15 +459,18 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     end)
   end
 
+  # Full-body buffering, only used by the RPC forwarding path where the
+  # body must be serialized and sent to a remote node. Local forwarding
+  # streams the body instead (see request_body/1).
   defp get_request_body(conn) do
     read_raw_body(conn)
   end
 
   defp read_raw_body(conn) do
     case Plug.Conn.read_body(conn,
-           length: 20_000_000,
-           read_length: 1_000_000,
-           read_timeout: 15_000
+           length: @max_body_length,
+           read_length: @body_read_length,
+           read_timeout: @body_read_timeout
          ) do
       {:ok, body, _conn} ->
         body
@@ -346,9 +486,9 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
   defp read_remaining_body(conn, acc_body) do
     case Plug.Conn.read_body(conn,
-           length: 20_000_000,
-           read_length: 1_000_000,
-           read_timeout: 15_000
+           length: @max_body_length,
+           read_length: @body_read_length,
+           read_timeout: @body_read_timeout
          ) do
       {:ok, body, _conn} -> acc_body <> body
       {:more, partial_body, conn} -> read_remaining_body(conn, acc_body <> partial_body)
