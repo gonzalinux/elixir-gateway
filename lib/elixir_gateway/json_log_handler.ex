@@ -15,7 +15,11 @@ defmodule ElixirGateway.JsonLogHandler do
 
     :logger.add_handler(@handler_id, :logger_std_h, %{
       level: level,
-      config: %{type: {:file, String.to_charlist(path)}},
+      config: %{
+        type: {:file, String.to_charlist(path)},
+        max_no_bytes: 10_000_000,
+        max_no_files: 3
+      },
       formatter: {__MODULE__, %{}}
     })
   end

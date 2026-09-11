@@ -15,6 +15,26 @@ defmodule ElixirGatewayWeb.Plugs.RateLimiter do
   end
 
   def call(conn, opts) do
+    if bypass?(conn) do
+      conn
+    else
+      do_call(conn, opts)
+    end
+  end
+
+  defp bypass?(conn) do
+    with token when is_binary(token) and token != "" <-
+           Application.get_env(:elixirgateway, :rate_limit_bypass_token),
+         [provided] <- get_req_header(conn, "x-ratelimit-bypass-token"),
+         true <- Plug.Crypto.secure_compare(provided, token) do
+      Logger.info("Rate limit bypassed via bypass token")
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp do_call(conn, opts) do
     {user_requests_per_minute, ip_requests_per_minute} =
       Keyword.get(opts, :rate_limit_config, {100, 500})
 

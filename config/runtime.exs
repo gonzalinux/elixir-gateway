@@ -44,6 +44,13 @@ if System.get_env("RATE_LIMIT_USER") || System.get_env("RATE_LIMIT_IP") do
     ]
 end
 
+# Rate limit bypass token (all environments)
+# If set, requests carrying a matching "x-ratelimit-bypass-token" header skip
+# rate limiting entirely. Intended for load testing. Not set by default.
+if bypass_token = System.get_env("RATE_LIMIT_BYPASS_TOKEN") do
+  config :elixirgateway, :rate_limit_bypass_token, bypass_token
+end
+
 # Bot blocker configuration (all environments)
 if System.get_env("BOT_BLOCKER_ENABLED") do
   enabled = System.get_env("BOT_BLOCKER_ENABLED") == "true"
