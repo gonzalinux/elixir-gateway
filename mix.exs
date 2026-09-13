@@ -42,7 +42,7 @@ defmodule ElixirGateway.MixProject do
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       {:hammer, "~> 7.0"},
-      {:finch, "~> 0.19"},
+      {:finch, "~> 0.23"},
       {:prom_ex, "~> 1.9"},
       {:gun, "~> 2.0"},
       {:syn, "~> 3.3"},

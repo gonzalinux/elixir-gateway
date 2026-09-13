@@ -9,6 +9,9 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   alias ElixirGateway.Cluster.Config
 
   @default_timeout_seconds 30
+  @max_body_length 20_000_000
+  @body_read_length 1_000_000
+  @body_read_timeout 15_000
 
   def init(opts), do: opts
 
@@ -204,35 +207,30 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
 
       # Prepare headers (exclude hop-by-hop headers)
       headers = prepare_headers(conn)
-      Logger.info("Request headers: #{inspect(headers)}")
 
-      # Get request body - either from parsed params or raw body
-      Logger.info("Getting request body...")
-      body = get_request_body(conn)
-      Logger.info("Body retrieved, length: #{byte_size(body)} bytes")
+      # Stream the request body instead of buffering it whole in memory.
+      # Small bodies (single chunk) are still sent as a plain binary.
+      body = request_body(conn)
 
       # Build Finch request
       method = String.upcase(conn.method)
       finch_request = Finch.build(method, full_url, headers, body)
-      Logger.info("Built Finch request, executing...")
 
       timeout_ms = round((conn.assigns[:timeout] || @default_timeout_seconds) * 1000)
 
-      # Execute request with the per-service/per-path configured timeout
-      case Finch.request(finch_request, ElixirGateway.Finch,
-             receive_timeout: timeout_ms,
-             request_timeout: timeout_ms
-           ) do
-        {:ok, response} ->
+      # Stream the backend response to the client chunk by chunk
+      case stream_backend_request(finch_request, conn, timeout_ms) do
+        {:ok, conn, status} ->
           duration = System.monotonic_time() - start_time
-          log_request(conn, response.status, duration)
+          log_request(conn, status, duration)
+          halt(conn)
 
-          conn
-          |> put_response_headers(response.headers)
-          |> send_resp(response.status, response.body)
-          |> halt()
+        {:closed, conn, status} ->
+          duration = System.monotonic_time() - start_time
+          log_request(conn, status || 499, duration)
+          halt(conn)
 
-        {:error, reason} ->
+        {:error, reason, conn} ->
           duration = System.monotonic_time() - start_time
           Logger.error("Request forwarding failed: #{inspect(reason)}")
           log_request(conn, 502, duration)
@@ -277,8 +275,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         "trailer",
         "transfer-encoding",
         "upgrade",
-        "host",
-        "content-length"
+        "host"
       ])
 
     filtered =
@@ -322,6 +319,49 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     end)
   end
 
+  defp request_body(conn) do
+    case read_body_chunk(conn) do
+      {:ok, chunk, _conn} ->
+        chunk
+
+      {:more, chunk, conn} ->
+        {:stream, Stream.concat([chunk], request_body_stream(conn))}
+
+      {:error, reason} ->
+        raise "failed to read request body: #{inspect(reason)}"
+    end
+  end
+
+  defp request_body_stream(conn) do
+    Stream.unfold(conn, fn
+      :done ->
+        nil
+
+      conn ->
+        case read_body_chunk(conn) do
+          {:ok, "", _conn} ->
+            nil
+
+          {:ok, chunk, _conn} ->
+            {chunk, :done}
+
+          {:more, chunk, conn} ->
+            {chunk, conn}
+
+          {:error, reason} ->
+            raise "failed to read request body: #{inspect(reason)}"
+        end
+    end)
+  end
+
+  defp read_body_chunk(conn) do
+    Plug.Conn.read_body(conn,
+      length: @max_body_length,
+      read_length: @body_read_length,
+      read_timeout: @body_read_timeout
+    )
+  end
+
   defp get_request_body(conn) do
     read_raw_body(conn)
   end
@@ -354,6 +394,74 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       {:more, partial_body, conn} -> read_remaining_body(conn, acc_body <> partial_body)
       {:error, _reason} -> acc_body
     end
+  end
+
+  defp stream_backend_request(finch_request, conn, timeout_ms) do
+    case Finch.stream_while(
+           finch_request,
+           ElixirGateway.Finch,
+           default_acc(conn),
+           &handle_backend_response/2,
+           receive_timeout: timeout_ms,
+           request_timeout: timeout_ms
+         ) do
+      {:ok, %{conn: conn, status: status, chunked: true, client_disconnected: true}} ->
+        {:closed, conn, status}
+
+      {:ok, %{conn: conn, status: status, chunked: true}} ->
+        {:ok, conn, status}
+
+      {:ok, %{conn: conn, status: status, headers: headers}} ->
+        status = status || 200
+
+        conn =
+          conn
+          |> put_response_headers(headers)
+          |> send_resp(status, "")
+
+        {:ok, conn, status}
+
+      {:error, reason, %{chunked: true, conn: conn, status: status}} ->
+        Logger.error("Backend stream interrupted mid-response: #{inspect(reason)}")
+        {:closed, conn, status}
+
+      {:error, reason, %{conn: conn}} ->
+        {:error, reason, conn}
+    end
+  end
+
+  defp handle_backend_response({:status, status}, acc) do
+    {:cont, %{acc | status: status}}
+  end
+
+  defp handle_backend_response({:headers, headers}, acc) do
+    {:cont, %{acc | headers: headers}}
+  end
+
+  defp handle_backend_response({:data, data}, acc) do
+    acc = ensure_response_started(acc)
+
+    case chunk(acc.conn, data) do
+      {:ok, conn} -> {:cont, %{acc | conn: conn}}
+      {:error, :closed} -> {:halt, %{acc | client_disconnected: true}}
+    end
+  end
+
+  defp handle_backend_response(_event, acc), do: {:cont, acc}
+
+  defp ensure_response_started(%{chunked: true} = acc), do: acc
+
+  defp ensure_response_started(%{conn: conn, status: status, headers: headers} = acc) do
+    conn =
+      conn
+      |> put_response_headers(headers)
+      |> send_chunked(status)
+
+    %{acc | conn: conn, chunked: true}
+  end
+
+  defp default_acc(conn) do
+    %{conn: conn, status: nil, headers: [], chunked: false, client_disconnected: false}
   end
 
   defp log_request(conn, status, duration_native) do
