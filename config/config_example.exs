@@ -58,15 +58,6 @@ config :hammer,
 config :elixirgateway, :websocket,
   # WebSocket upgrade timeout (30 seconds default, configurable for slow networks)
   upgrade_timeout: 30_000,
-  # Connection pool settings per target host
-  connection_pool: [
-    # Max connections per target host
-    size: 10,
-    # 5 minutes idle timeout
-    max_idle_time: 300_000,
-    # Cleanup every minute
-    cleanup_interval: 60_000
-  ],
   # Reconnection settings
   reconnect: [
     # Maximum reconnection attempts

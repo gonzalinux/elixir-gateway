@@ -54,10 +54,10 @@ Internet → Bot Blocker → Rate Limiter → WebSocket Upgrade Check → Domain
 - **`MetricsAuthPlug`** - Protects `/metrics` endpoint with authentication
 
 #### WebSocket Proxying
-- **`EnhancedGunWebSocketHandler`** - Advanced WebSocket handler with connection pooling, automatic reconnection, and message queuing
+- **`EnhancedGunWebSocketHandler`** - Advanced WebSocket handler with automatic reconnection and message queuing
 - Bidirectional message forwarding with session preservation
 - Full Phoenix LiveView support
-- Connection pooling for improved performance
+- One dedicated Gun connection per client WebSocket (upgraded connections cannot be reused, so they are not pooled)
 - Automatic reconnection with exponential backoff
 - Message queuing during connection interruptions
 
