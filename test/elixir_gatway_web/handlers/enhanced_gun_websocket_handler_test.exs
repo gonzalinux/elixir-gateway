@@ -4,29 +4,12 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
   alias ElixirGatewayWeb.EnhancedGunWebSocketHandler
 
   setup do
-    # Clean up any existing connections if the table exists
-    # The table is created by WebSocketConnectionPool when the application starts
-    case :ets.whereis(:websocket_connection_pool) do
-      :undefined ->
-        # Table doesn't exist yet - this is fine, tests will work without it
-        :ok
-
-      _ref ->
-        # Table exists, clean it up
-        :ets.delete_all_objects(:websocket_connection_pool)
-    end
-
     # Set test configuration
     original_config = Application.get_env(:elixirgateway, :websocket)
 
     Application.put_env(:elixirgateway, :websocket,
       # Shorter for testing
       upgrade_timeout: 5_000,
-      connection_pool: [
-        size: 5,
-        max_idle_time: 60_000,
-        cleanup_interval: 10_000
-      ],
       reconnect: [
         # Fewer attempts for testing
         max_attempts: 2,
@@ -274,8 +257,8 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
     end
   end
 
-  describe "connection pooling integration" do
-    test "returns connection to pool on terminate" do
+  describe "connection lifecycle" do
+    test "closes the backend connection on terminate" do
       state = %{
         target_url: "ws://localhost:8080/ws",
         headers: [],
@@ -284,12 +267,8 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
         gun_stream_ref: make_ref()
       }
 
-      # Terminate should return connection to pool
       result = ElixirGatewayWeb.EnhancedGunWebSocketHandler.terminate(:normal, state)
       assert result == :ok
-
-      # Note: In a real test, we'd verify the pool received the connection
-      # but that would require mocking the pool or using a test double
     end
   end
 

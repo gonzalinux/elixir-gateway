@@ -44,7 +44,7 @@ The actual WebSocket proxy implementation that manages the connection lifecycle 
 **Key Features**:
 - Implements the `WebSock` behavior for Phoenix compatibility
 - Uses Gun HTTP client for high-performance WebSocket connections
-- Connection pooling via `WebSocketConnectionPool` for improved resource management
+- One dedicated Gun connection per client WebSocket, owned by the handler and closed on terminate (upgraded connections cannot be reused, so they are not pooled)
 - Automatic reconnection with exponential backoff and jitter
 - Message queuing during connection interruptions (configurable queue size)
 - Provides bidirectional message forwarding
@@ -184,7 +184,7 @@ While not explicitly LiveView-specific, this proxy architecture fully supports P
 ## Performance Characteristics
 
 - **Gun HTTP client**: High-performance, low-latency WebSocket connections
-- **Connection pooling**: Gun manages connection pools to backend services
+- **One connection per socket**: each client WebSocket has its own Gun process and backend connection; the BEAM handles large numbers of these cheaply
 - **Memory efficiency**: Minimal state management per connection
 - **Concurrent connections**: Supports thousands of simultaneous WebSocket connections
 
