@@ -34,46 +34,6 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandlerTest do
     :ok
   end
 
-  describe "configuration and timeouts" do
-    @tag :integration
-    test "uses configurable upgrade timeout" do
-      state = %{
-        target_url: "ws://localhost:8080/ws",
-        headers: []
-      }
-
-      # Mock the connection pool to return an error to test timeout handling
-      # This test verifies that the configurable timeout is used
-      result = EnhancedGunWebSocketHandler.init(state)
-
-      # Should fail because localhost:8080 isn't running, but timeout should be from config
-      assert {:stop, :normal, _state} = result
-    end
-
-    @tag :integration
-    test "initializes state with reconnection fields" do
-      state = %{
-        target_url: "ws://localhost:8080/ws",
-        headers: []
-      }
-
-      # Even if init fails, we can test state structure
-      case EnhancedGunWebSocketHandler.init(state) do
-        {:ok, new_state} ->
-          assert Map.has_key?(new_state, :reconnect_attempts)
-          assert Map.has_key?(new_state, :message_queue)
-          assert Map.has_key?(new_state, :connection_status)
-          assert new_state.reconnect_attempts == 0
-          assert :queue.len(new_state.message_queue) == 0
-          assert new_state.connection_status == :connecting
-
-        {:stop, :normal, _state} ->
-          # Expected when connection fails
-          :ok
-      end
-    end
-  end
-
   describe "message queueing" do
     test "queues messages when not connected" do
       state = %{

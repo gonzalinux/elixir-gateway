@@ -54,9 +54,6 @@ jobs:
         run: mix compile --warnings-as-errors
 
       - name: Run tests
-        run: |
-          # Run tests excluding connection pool tests that require real network connections
-          # These tests would fail in CI since they try to connect to localhost servers
-          mix test --exclude integration
+        run: mix test
         env:
           MIX_ENV: test
