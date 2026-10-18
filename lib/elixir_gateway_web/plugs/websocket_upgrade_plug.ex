@@ -13,47 +13,32 @@ defmodule ElixirGatewayWeb.Plugs.WebSocketUpgradePlug do
   def init(_opts), do: []
 
   @impl Plug
-  def call(%Plug.Conn{} = conn, opts) do
-    # Check cluster affinity first
-    case ElixirGateway.Cluster.ConnectionRegistry.get_node(conn) do
-      :local ->
-        process_locally(conn, opts)
-
-      {:remote, node} ->
-        if websocket_upgrade_request?(conn) do
-          # WS can only run on the node holding the TCP connection (this one).
-          # Re-anchor the session here so subsequent HTTP requests also stay local,
-          # keeping WS and HTTP on the same backend.
-          Logger.info("Re-anchoring WS session from #{node} to local node")
-          ElixirGateway.Cluster.ConnectionRegistry.register_session(conn, node())
-          process_locally(conn, opts)
-        else
-          # Regular HTTP request with remote affinity - let LoadDistributionRouter handle it
-          conn
-        end
-
-      :new_session ->
-        if websocket_upgrade_request?(conn) do
-          # Register WS-initiated sessions locally so subsequent HTTP requests
-          # (e.g. LiveView page reloads) land on the same backend.
-          ElixirGateway.Cluster.ConnectionRegistry.register_session(conn, node())
-        end
-
-        process_locally(conn, opts)
-
-      :not_clustered ->
-        # Clustering disabled, process locally
-        process_locally(conn, opts)
-    end
+  def call(%Plug.Conn{} = conn, _opts) do
+    maybe_upgrade(conn, websocket_upgrade_request?(conn))
   end
 
-  defp process_locally(%Plug.Conn{} = conn, _opts) do
-    if websocket_upgrade_request?(conn) do
-      Logger.debug("WebSocket upgrade detected for: #{conn.request_path}")
-      handle_websocket_upgrade(conn)
-    else
-      conn
+  defp maybe_upgrade(%Plug.Conn{} = conn, false) do
+    conn
+  end
+
+  defp maybe_upgrade(%Plug.Conn{} = conn, true) do
+    case ElixirGateway.Cluster.ConnectionRegistry.get_node(conn) do
+      {:remote, node} ->
+        # WS can only run on the node holding the TCP connection (this one).
+        # Re-anchor the session here so subsequent HTTP requests also stay local,
+        # keeping WS and HTTP on the same backend.
+        Logger.info("Re-anchoring WS session from #{node} to local node")
+        ElixirGateway.Cluster.ConnectionRegistry.register_session(conn, node())
+
+      :new_session ->
+        ElixirGateway.Cluster.ConnectionRegistry.register_session(conn, node())
+
+      _ ->
+        :ok
     end
+
+    Logger.debug("WebSocket upgrade detected for: #{conn.request_path}")
+    handle_websocket_upgrade(conn)
   end
 
   defp websocket_upgrade_request?(conn) do
