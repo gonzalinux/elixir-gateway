@@ -299,8 +299,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       MapSet.new([
         "connection",
         "keep-alive",
-        "transfer-encoding",
-        "content-length"
+        "transfer-encoding"
       ])
 
     Enum.reduce(headers, conn, fn {name, value}, acc_conn ->
