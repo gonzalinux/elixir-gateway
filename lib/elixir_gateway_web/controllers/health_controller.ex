@@ -67,7 +67,6 @@ defmodule ElixirGatewayWeb.HealthController do
   defp perform_health_checks do
     checks = %{
       database: check_database(),
-      websocket_pool: check_websocket_pool(),
       rate_limiter: check_rate_limiter(),
       configuration: check_configuration()
     }
@@ -102,29 +101,6 @@ defmodule ElixirGatewayWeb.HealthController do
     rescue
       _ ->
         %{status: "degraded", message: "ETS table check failed"}
-    end
-  end
-
-  defp check_websocket_pool do
-    # Check WebSocket connection pool status
-    try do
-      case ElixirGatewayWeb.WebSocketConnectionPool.get_stats() do
-        stats when is_map(stats) ->
-          %{
-            status: "healthy",
-            message: "WebSocket pool available",
-            stats: %{
-              total_connections: stats.total_connections,
-              total_hosts: stats.total_hosts
-            }
-          }
-
-        _ ->
-          %{status: "degraded", message: "WebSocket pool statistics unavailable"}
-      end
-    rescue
-      _ ->
-        %{status: "unhealthy", message: "WebSocket pool unavailable"}
     end
   end
 

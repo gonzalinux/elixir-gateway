@@ -181,7 +181,6 @@ Elixir-Gateway provides health check endpoints for load balancers and monitoring
   "checks": {
     "overall": "healthy",
     "database": {"status": "healthy", "message": "ETS tables available"},
-    "websocket_pool": {"status": "healthy", "message": "WebSocket pool available"},
     "rate_limiter": {"status": "healthy", "message": "Rate limiter functional"},
     "configuration": {"status": "healthy", "message": "Gateway configuration valid"}
   }
@@ -265,7 +264,7 @@ export CORS_METHODS="GET,POST,PUT,DELETE,OPTIONS"
 1. **Port conflicts**: Ensure ports 4000 and 4001 are available
 2. **SSL certificate issues**: Check certificate storage directory permissions
 3. **Rate limiting**: Verify ETS tables are created properly
-4. **WebSocket connections**: Check connection pool configuration
+4. **WebSocket connections**: Check the `:websocket` settings (upgrade timeout, reconnect) and that the backend accepts the upgrade
 
 ### SSL Certificate Management
 

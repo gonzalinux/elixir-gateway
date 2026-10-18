@@ -1,13 +1,16 @@
 defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   @moduledoc """
-  Enhanced WebSocket handler with connection pooling, automatic reconnection,
-  message queuing, and improved error handling.
+  Enhanced WebSocket handler with automatic reconnection, message queuing,
+  and improved error handling.
+
+  Each client WebSocket gets its own Gun connection to the backend, owned by
+  this handler process. A Gun connection that has been upgraded to WebSocket
+  cannot be reused for another upgrade, so these connections are never pooled.
   """
 
   require Logger
   @behaviour WebSock
 
-  alias ElixirGatewayWeb.WebSocketConnectionPool
   alias ElixirGateway.Utils
 
   # Default configuration
@@ -136,7 +139,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
         Logger.error("Failed to read response body: #{inspect(reason)}")
     end
 
-    WebSocketConnectionPool.remove_connection(state.target_url, gun_pid)
+    :gun.close(gun_pid)
 
     if should_reconnect?(state) do
       new_state =
@@ -153,7 +156,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   def handle_info({:gun_error, gun_pid, _stream_ref, reason}, state) do
     Logger.error("Gun error: #{inspect(reason)}")
 
-    WebSocketConnectionPool.remove_connection(state.target_url, gun_pid)
+    :gun.close(gun_pid)
 
     if should_reconnect?(state) do
       new_state =
@@ -202,7 +205,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   def handle_info({:gun_down, gun_pid, _protocol, reason, _killed_streams}, state) do
     Logger.error("Gun connection down: #{inspect(reason)}")
 
-    WebSocketConnectionPool.remove_connection(state.target_url, gun_pid)
+    :gun.close(gun_pid)
 
     if should_reconnect?(state) do
       new_state =
@@ -221,7 +224,7 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
       Logger.error("WebSocket upgrade timeout")
 
       if state.gun_pid do
-        WebSocketConnectionPool.remove_connection(state.target_url, state.gun_pid)
+        :gun.close(state.gun_pid)
       end
 
       if should_reconnect?(state) do
@@ -294,9 +297,9 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
   def terminate(reason, state) do
     Logger.info("Enhanced WebSocket handler terminated: #{inspect(reason)}")
 
-    # Return connection to pool if it exists
+    # Close the backend connection so the upstream socket doesn't linger
     if state[:gun_pid] do
-      WebSocketConnectionPool.return_connection(state.target_url, state.gun_pid)
+      :gun.close(state.gun_pid)
     end
 
     :ok
@@ -304,19 +307,49 @@ defmodule ElixirGatewayWeb.EnhancedGunWebSocketHandler do
 
   # Private functions
 
-  defp establish_connection(target_url, headers, _config) do
-    case WebSocketConnectionPool.get_connection(target_url) do
+  defp establish_connection(target_url, headers, config) do
+    case open_gun_connection(target_url, config.connection_timeout) do
       {:ok, gun_pid} ->
-        # Use pooled connection
         {:ok, stream_ref} = send_websocket_upgrade(gun_pid, target_url, headers)
         {:ok, gun_pid, stream_ref}
 
-      {:error, :pool_limit_reached} ->
-        Logger.warning("Connection pool limit reached for #{target_url}")
-        {:error, :pool_limit_reached}
+      {:error, reason} ->
+        Logger.error("Failed to open connection to #{target_url}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  # Opens a dedicated Gun connection owned by the calling (handler) process, so
+  # connection-level messages such as :gun_down are delivered here.
+  defp open_gun_connection(target_url, connection_timeout) do
+    uri = URI.parse(target_url)
+
+    transport =
+      case uri.scheme do
+        "wss" -> :tls
+        _ -> :tcp
+      end
+
+    port = uri.port || if transport == :tls, do: 443, else: 80
+
+    gun_opts = %{
+      retry: 0,
+      transport: transport,
+      protocols: [:http]
+    }
+
+    case :gun.open(String.to_charlist(uri.host), port, gun_opts) do
+      {:ok, gun_pid} ->
+        case :gun.await_up(gun_pid, connection_timeout) do
+          {:ok, _protocol} ->
+            {:ok, gun_pid}
+
+          {:error, reason} ->
+            :gun.close(gun_pid)
+            {:error, reason}
+        end
 
       {:error, reason} ->
-        Logger.error("Failed to get connection from pool: #{inspect(reason)}")
         {:error, reason}
     end
   end
