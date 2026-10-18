@@ -88,10 +88,10 @@ defmodule ElixirGateway.CertStoreTest do
     test "returns priv/certs opts when no ETS entry matches" do
       :ets.delete_all_objects(@table)
 
-      # Default config points dev_cert_dir to priv/certs which has cert.pem and key.pem
+      # priv/certs is for actual running apps, so we use the dummy ones.
       Application.put_env(:elixirgateway, :cert_store,
         certbot_config_dir: "/nonexistent/certbot",
-        dev_cert_dir: "priv/certs"
+        dev_cert_dir: "test/support/fixtures/dev_certs"
       )
 
       result = CertStore.sni_fun(~c"nomatch.dev-fallback-test.example")

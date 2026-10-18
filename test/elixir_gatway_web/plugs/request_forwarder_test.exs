@@ -365,6 +365,27 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
       assert conn.resp_body == large_body
     end
 
+    test "forwards the backend content-length on streamed responses", %{
+      bypass: bypass,
+      target_url: target_url
+    } do
+      large_body = :crypto.strong_rand_bytes(5 * 1024 * 1024)
+
+      Bypass.expect_once(bypass, "GET", "/api/big-download", fn conn ->
+        Plug.Conn.resp(conn, 200, large_body)
+      end)
+
+      conn =
+        Plug.Test.conn(:get, "/api/big-download")
+        |> assign(:target_url, target_url)
+        |> assign(:original_host, "api.example.com")
+        |> RequestForwarder.call([])
+
+      assert conn.state == :chunked
+      assert get_resp_header(conn, "content-length") == [Integer.to_string(byte_size(large_body))]
+      assert get_resp_header(conn, "transfer-encoding") == []
+    end
+
     test "sends empty responses without chunked encoding", %{
       bypass: bypass,
       target_url: target_url
