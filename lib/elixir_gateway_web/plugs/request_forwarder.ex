@@ -12,10 +12,19 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   @max_body_length 20_000_000
   @body_read_length 1_000_000
   @body_read_timeout 15_000
+  # Latest conn returned by read_body/2. The adapter tracks how much of the
+  # body has been read, and Bandit drains whatever it thinks is unread after
+  # the response; replying with a stale conn makes it consume the next
+  # keep-alive request instead.
+  @body_conn_key {__MODULE__, :body_conn}
 
   def init(opts), do: opts
 
   def call(conn, opts) do
+    # Bandit reuses the process for keep-alive requests; never leak a conn
+    # from the previous request on this connection
+    Process.delete(@body_conn_key)
+
     # Check target_node assignment from LoadDistributionRouter
     target_node = conn.assigns[:target_node]
 
@@ -70,13 +79,16 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
     timeout_seconds = conn.assigns[:timeout] || @default_timeout_seconds
     timeout_ms = round(timeout_seconds * 1000)
 
+    body = get_request_body(conn)
+    conn = take_body_conn(conn)
+
     # Serialize request data for RPC call
     request_data = %{
       method: conn.method,
       path: conn.request_path,
       query: conn.query_string,
       headers: conn.req_headers,
-      body: get_request_body(conn),
+      body: body,
       target_url: conn.assigns[:target_url],
       original_host: conn.assigns[:original_host],
       timeout_ms: timeout_ms
@@ -244,6 +256,7 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
       error ->
         duration = System.monotonic_time() - start_time
         Logger.error("Request forwarding error: #{inspect(error)}")
+        conn = take_body_conn(conn)
         log_request(conn, 500, duration)
 
         conn
@@ -354,43 +367,35 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   end
 
   defp read_body_chunk(conn) do
-    Plug.Conn.read_body(conn,
-      length: @max_body_length,
-      read_length: @body_read_length,
-      read_timeout: @body_read_timeout
-    )
-  end
-
-  defp get_request_body(conn) do
-    read_raw_body(conn)
-  end
-
-  defp read_raw_body(conn) do
     case Plug.Conn.read_body(conn,
-           length: 20_000_000,
-           read_length: 1_000_000,
-           read_timeout: 15_000
+           length: @max_body_length,
+           read_length: @body_read_length,
+           read_timeout: @body_read_timeout
          ) do
-      {:ok, body, _conn} ->
-        body
+      {:error, _reason} = error ->
+        error
 
-      {:more, partial_body, conn} ->
-        # For large binary files, read in chunks
-        read_remaining_body(conn, partial_body)
-
-      {:error, _reason} ->
-        ""
+      {status, chunk, conn} ->
+        Process.put(@body_conn_key, conn)
+        {status, chunk, conn}
     end
   end
 
-  defp read_remaining_body(conn, acc_body) do
-    case Plug.Conn.read_body(conn,
-           length: 20_000_000,
-           read_length: 1_000_000,
-           read_timeout: 15_000
-         ) do
+  # Returns the conn from the most recent body read (see @body_conn_key), or
+  # `conn` if the body was never read
+  defp take_body_conn(conn) do
+    Process.delete(@body_conn_key) || conn
+  end
+
+  defp get_request_body(conn) do
+    read_raw_body(conn, "")
+  end
+
+  defp read_raw_body(conn, acc_body) do
+    case read_body_chunk(conn) do
       {:ok, body, _conn} -> acc_body <> body
-      {:more, partial_body, conn} -> read_remaining_body(conn, acc_body <> partial_body)
+      # For large binary files, read in chunks
+      {:more, partial_body, conn} -> read_raw_body(conn, acc_body <> partial_body)
       {:error, _reason} -> acc_body
     end
   end
@@ -425,12 +430,14 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
         {:closed, conn, status}
 
       {:error, reason, %{conn: conn}} ->
-        {:error, reason, conn}
+        {:error, reason, take_body_conn(conn)}
     end
   end
 
+  # Finch has sent the whole request body before the status arrives, so the
+  # body has been fully read by now; respond on the conn that knows it
   defp handle_backend_response({:status, status}, acc) do
-    {:cont, %{acc | status: status}}
+    {:cont, %{acc | status: status, conn: take_body_conn(acc.conn)}}
   end
 
   defp handle_backend_response({:headers, headers}, acc) do
