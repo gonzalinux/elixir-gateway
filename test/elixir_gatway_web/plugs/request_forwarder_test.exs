@@ -407,6 +407,73 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarderTest do
     end
   end
 
+  describe "keep-alive connections" do
+    defmodule ForwardingPlug do
+      def init(opts), do: opts
+
+      def call(conn, target_url) do
+        conn
+        |> Plug.Conn.assign(:target_url, target_url)
+        |> Plug.Conn.assign(:original_host, "api.example.com")
+        |> RequestForwarder.call([])
+      end
+    end
+
+    # Regression: the forwarder read the body through a conn it then discarded,
+    # so Bandit thought the body was still unread and, when part of it had
+    # arrived after the headers, consumed the start of the next request on the
+    # connection as "remaining body" (-> 400 "Request line HTTP error").
+    test "body arriving after the headers does not corrupt the next request", %{
+      bypass: bypass,
+      target_url: target_url
+    } do
+      Bypass.expect_once(bypass, "POST", "/api/meals", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        assert body == ~s({"name":"split body"})
+        Plug.Conn.resp(conn, 201, "created")
+      end)
+
+      Bypass.expect_once(bypass, "DELETE", "/api/meals/1", fn conn ->
+        Plug.Conn.resp(conn, 204, "")
+      end)
+
+      server =
+        start_supervised!(
+          {Bandit, plug: {ForwardingPlug, target_url}, port: 0, ip: :loopback, startup_log: false}
+        )
+
+      {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
+      {:ok, socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false])
+
+      body = ~s({"name":"split body"})
+      {head, tail} = String.split_at(body, 10)
+
+      :ok =
+        :gen_tcp.send(
+          socket,
+          "POST /api/meals HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n" <>
+            "content-length: #{byte_size(body)}\r\n\r\n" <> head
+        )
+
+      # Let Bandit parse the headers before the rest of the body shows up
+      Process.sleep(100)
+      :ok = :gen_tcp.send(socket, tail)
+      assert "HTTP/1.1 201" <> _ = recv_until(socket, "created")
+
+      :ok = :gen_tcp.send(socket, "DELETE /api/meals/1 HTTP/1.1\r\nhost: localhost\r\n\r\n")
+      assert "HTTP/1.1 204" <> _ = recv_until(socket, "\r\n\r\n")
+    end
+  end
+
+  defp recv_until(socket, suffix, acc \\ "") do
+    if String.ends_with?(acc, suffix) do
+      acc
+    else
+      {:ok, data} = :gen_tcp.recv(socket, 0, 5_000)
+      recv_until(socket, suffix, acc <> data)
+    end
+  end
+
   defp read_full_body(conn, acc) do
     case Plug.Conn.read_body(conn, length: 8_000_000) do
       {:ok, chunk, conn} -> {:ok, acc <> chunk, conn}
