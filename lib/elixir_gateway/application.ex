@@ -49,6 +49,7 @@ defmodule ElixirGateway.Application do
         {Phoenix.PubSub, name: ElixirGateway.PubSub},
         # Start Finch for HTTP client
         {Finch, name: ElixirGateway.Finch},
+        {Finch, name: ElixirGatewat.HealthFinch, pools: %{default: [size: 5]}},
         ElixirGateway.RateLimit
       ] ++
         cluster_supervisor ++

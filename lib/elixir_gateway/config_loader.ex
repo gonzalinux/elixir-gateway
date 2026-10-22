@@ -18,6 +18,60 @@ defmodule ElixirGateway.ConfigLoader do
 
   @default_path "priv/gateway.yaml"
 
+  # --- Types ---
+  # Raw YAML types use string keys, as parsed by YamlElixir. Typespecs can't
+  # express string literal keys, so the expected keys are listed in the typedocs.
+  # The output types are what ends up in Application env under :gateway.
+
+  @typedoc "Raw `services:` section of gateway.yaml, keyed by service name (e.g. \"service1\")"
+  @type yaml_services :: %{String.t() => yaml_service()}
+
+  @typedoc """
+  A single raw service entry from gateway.yaml:
+
+    * `"target"` (required) - backend URL, e.g. `"http://localhost:8080"`
+    * `"domains"` - list of `t:yaml_domain/0`
+    * `"ssl"` - `true`, or a map with `"enabled"` and `"force_https"` booleans
+    * `"ddns"` - map with `"provider"` (`"namecheap"` default, or `"cloudflare"`),
+      `"record"`, `"domain"` and `"token"` (Namecheap only)
+    * `"timeout"` - seconds, overrides the top-level `timeout`
+    * `"paths"` - `%{path_regex => %{method => %{"timeout" => seconds}}}`
+  """
+  @type yaml_service :: %{String.t() => term()}
+
+  @typedoc """
+  A domain entry: a plain host, or a map with `"name"` (required) and
+  `"dns_challenge"` (boolean, requests a DNS-01 wildcard cert)
+  """
+  @type yaml_domain :: String.t() | %{String.t() => String.t() | boolean()}
+
+  @typedoc """
+  `:services` in the :gateway env: host => target URL, e.g.
+  `%{"service1.com" => "http://localhost:8080", "default_any" => "http://..."}`.
+  Hosts can be wildcards (`"*.service1.com"`); `"default"` is stored as `"default_any"`.
+  """
+  @type routing_map :: %{(host :: String.t()) => target_url :: String.t()}
+
+  @typedoc "`:timeouts` in the :gateway env: host => path matchers, the catch-all last"
+  @type timeouts_map :: %{(host :: String.t()) => [path_matcher()]}
+
+  @type service_health_check :: %{
+          name: name :: String.t(),
+          target: target :: String.t(),
+          domains: domains :: list(String.t()),
+          health_path: health_path :: String.t()
+        }
+  @typedoc "Timeout for requests matching a path regex and method (`\".*\"` matches any method)"
+  @type path_matcher :: %{pattern: Regex.t(), method: String.t(), timeout: number()}
+
+  @spec get_services() :: routing_map()
+  def get_services do
+    :elixirgateway
+    |> Application.get_env(:gateway, [])
+    |> Keyword.get(:services, %{})
+  end
+
+  @spec load() :: :ok
   def load do
     path = System.get_env("GATEWAY_CONFIG_FILE", @default_path)
 
@@ -63,8 +117,10 @@ defmodule ElixirGateway.ConfigLoader do
     apply_ssl_domains(services)
     apply_ddns(services)
     apply_timeouts(services, default_timeout)
+    apply_health_checks(services)
   end
 
+  @spec apply_services(yaml_services()) :: :ok
   defp apply_services(services) do
     routing_map =
       services
@@ -182,8 +238,13 @@ defmodule ElixirGateway.ConfigLoader do
     end
   end
 
+  @spec apply_health_checks(services :: yaml_services()) :: service_health_check()
+  defp apply_health_checks(services) do
+  end
+
   # Builds a host-keyed map of path matchers (regex + method + timeout), mirroring
   # apply_services so DomainRouter can resolve a timeout the same way it resolves a target.
+  @spec apply_timeouts(yaml_services(), number()) :: :ok
   defp apply_timeouts(services, default_timeout) do
     timeouts_map =
       services
@@ -210,6 +271,7 @@ defmodule ElixirGateway.ConfigLoader do
     Logger.debug("ConfigLoader: loaded timeouts for #{map_size(timeouts_map)} hosts")
   end
 
+  @spec build_path_matchers(yaml_service(), number()) :: [path_matcher()]
   defp build_path_matchers(service, default_timeout) do
     path_matchers =
       service
@@ -228,6 +290,7 @@ defmodule ElixirGateway.ConfigLoader do
   end
 
   # Domain entries can be a plain string or a map with name + optional dns_challenge flag.
+  @spec normalize_domain(yaml_domain()) :: {String.t(), boolean()}
   defp normalize_domain(domain) when is_binary(domain), do: {domain, false}
 
   defp normalize_domain(%{"name" => name} = entry),
