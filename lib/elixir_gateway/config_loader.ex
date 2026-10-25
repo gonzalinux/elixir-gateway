@@ -55,11 +55,13 @@ defmodule ElixirGateway.ConfigLoader do
   @typedoc "`:timeouts` in the :gateway env: host => path matchers, the catch-all last"
   @type timeouts_map :: %{(host :: String.t()) => [path_matcher()]}
 
+  @type service_health_map :: %{(name :: String.t()) => service_health_check()}
   @type service_health_check :: %{
-          name: name :: String.t(),
-          target: target :: String.t(),
-          domains: domains :: list(String.t()),
-          health_path: health_path :: String.t()
+          name: String.t(),
+          target: String.t(),
+          domains: list(String.t()),
+          health_path: String.t(),
+          health_domain: String.t() | nil
         }
   @typedoc "Timeout for requests matching a path regex and method (`\".*\"` matches any method)"
   @type path_matcher :: %{pattern: Regex.t(), method: String.t(), timeout: number()}
@@ -69,6 +71,13 @@ defmodule ElixirGateway.ConfigLoader do
     :elixirgateway
     |> Application.get_env(:gateway, [])
     |> Keyword.get(:services, %{})
+  end
+
+  @spec get_health_services() :: service_health_map()
+  def get_health_services do
+    :elixirgateway
+    |> Application.get_env(:gateway, [])
+    |> Keyword.get(:health, %{})
   end
 
   @spec load() :: :ok
@@ -238,8 +247,47 @@ defmodule ElixirGateway.ConfigLoader do
     end
   end
 
-  @spec apply_health_checks(services :: yaml_services()) :: service_health_check()
+  @spec apply_health_checks(services :: yaml_services()) :: :ok
   defp apply_health_checks(services) do
+    health_map =
+      services
+      |> Enum.map(fn {name, service} ->
+        domains =
+          Map.get(service, "domains", [])
+          |> Enum.map(fn domain ->
+            {domain, _other} = normalize_domain(domain)
+            domain
+          end)
+
+        health_domain =
+          domains
+          # For the moment we add a health subdomain.
+          |> Enum.filter(fn domain -> domain != "default" and domain != "default_any" end)
+          |> Enum.map(fn domain ->
+            if String.starts_with?(domain, "*") do
+              String.replace(domain, "\*", "health")
+            else
+              domain
+            end
+          end)
+          |> Enum.sort_by(&String.length/1)
+          |> List.first()
+
+        {name,
+         %{
+           name: name,
+           health_path: Map.get(service, "health_path", "/health"),
+           health_domain: health_domain,
+           domains: domains,
+           target: Map.fetch!(service, "target")
+         }}
+      end)
+      |> Map.new()
+
+    existing = Application.get_env(:elixirgateway, :gateway, [])
+    Application.put_env(:elixirgateway, :gateway, Keyword.put(existing, :health, health_map))
+
+    :ok
   end
 
   # Builds a host-keyed map of path matchers (regex + method + timeout), mirroring
