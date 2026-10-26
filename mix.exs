@@ -9,7 +9,9 @@ defmodule ElixirGateway.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      # lib/mix/tasks uses Mix, which isn't a runtime dependency
+      dialyzer: [plt_add_apps: [:mix]]
     ]
   end
 
@@ -52,6 +54,7 @@ defmodule ElixirGateway.MixProject do
       {:yaml_elixir, "~> 2.9"},
       {:bypass, "~> 2.1", only: :test},
       {:mock, "~> 0.3.0", only: :test},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:k6, "~> 0.2.1"}
     ]
   end
