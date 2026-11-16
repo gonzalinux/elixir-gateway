@@ -33,6 +33,10 @@ config :elixirgateway, :bot_blocker,
   block_duration_seconds: 3600,
   max_404s_before_block: 10
 
+# PromEx's Phoenix HTTP metrics tag the raw conn.host (unbounded under bot scans);
+# ElixirGateway.PromEx.Plugins.Gateway re-emits them with a bounded host label.
+config :elixirgateway, ElixirGateway.PromEx, drop_metrics_groups: [:phoenix_http_event_metrics]
+
 # Configures the endpoint
 config :elixirgateway, ElixirGatewayWeb.Endpoint,
   url: [host: "localhost"],

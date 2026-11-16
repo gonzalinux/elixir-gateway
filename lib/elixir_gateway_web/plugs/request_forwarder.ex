@@ -492,28 +492,16 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
   end
 
   defp emit_telemetry(conn, status, duration_native) do
-    # Sample 1 in 10 requests for path tracking to reduce cardinality
-    metadata =
-      if rem(System.unique_integer([:positive]), 10) == 0 do
-        %{
-          method: String.upcase(conn.method),
-          status: to_string(status),
-          target_service: conn.assigns[:target_url] || "unknown",
-          path: conn.request_path,
-          host:
-            conn.assigns[:original_host] || get_req_header(conn, "host") |> List.first() ||
-              "unknown"
-        }
-      else
-        %{
-          method: String.upcase(conn.method),
-          status: to_string(status),
-          target_service: conn.assigns[:target_url] || "unknown",
-          host:
-            conn.assigns[:original_host] || get_req_header(conn, "host") |> List.first() ||
-              "unknown"
-        }
-      end
+    # Paths and unregistered hosts are unbounded (bot scans), so they are left to the
+    # logs; metric labels only carry bounded values.
+    host = conn.assigns[:original_host] || get_req_header(conn, "host") |> List.first()
+
+    metadata = %{
+      method: String.upcase(conn.method),
+      status: to_string(status),
+      target_service: conn.assigns[:target_url] || "unknown",
+      host: ElixirGatewayWeb.Plugs.DomainRouter.metrics_host(host)
+    }
 
     :telemetry.execute(
       [:elixirgateway, :request, :complete],
