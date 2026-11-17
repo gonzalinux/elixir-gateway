@@ -13,7 +13,7 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
   def call(conn, _opts) do
     host = get_host(conn)
 
-    case resolve_service(host) do
+    case resolve_service_entry(host) do
       nil ->
         Logger.warning("No service configured for host: #{host}")
 
@@ -22,9 +22,10 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
         |> send_resp(404, Jason.encode!(%{error: "Service not found for host: #{host}"}))
         |> halt()
 
-      target_url ->
+      {service_key, target_url} ->
         conn
         |> assign(:target_url, target_url)
+        |> assign(:service_key, service_key)
         |> assign(:original_host, host)
         |> assign(:force_https, force_https?(host))
         |> assign(:timeout, resolve_timeout(host, conn.method, conn.request_path))
@@ -37,12 +38,40 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
   Returns the target URL string, or nil if no service is configured for the host.
   Checks exact match, wildcard patterns, and the default_any fallback in order.
   """
+  @spec resolve_service(String.t()) :: String.t() | nil
   def resolve_service(host) do
+    case resolve_service_entry(host) do
+      {_service_key, target_url} -> target_url
+      nil -> nil
+    end
+  end
+
+  @doc """
+  Like `resolve_service/1`, but returns `{service_key, target_url}`, where `service_key`
+  is the routing key that matched (e.g. `"api.example.com"`, `"*.example.com"` or
+  `"default_any"`), or nil if no service is configured for the host.
+  """
+  @spec resolve_service_entry(String.t()) :: {String.t(), String.t()} | nil
+  def resolve_service_entry(host) do
     services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
 
-    Map.get(services, host) ||
-      find_wildcard_match(services, host) ||
-      if(host != "default", do: Map.get(services, "default_any"))
+    exact_entry(services, host) ||
+      wildcard_entry(services, host) ||
+      if(host != "default", do: exact_entry(services, "default_any"))
+  end
+
+  defp exact_entry(services, key) do
+    case Map.fetch(services, key) do
+      {:ok, target_url} -> {key, target_url}
+      :error -> nil
+    end
+  end
+
+  defp wildcard_entry(services, host) do
+    Enum.find(services, fn
+      {"*" <> suffix, _target_url} -> String.ends_with?(host, suffix) or host == suffix
+      _ -> false
+    end)
   end
 
   defp force_https?(host) do

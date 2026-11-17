@@ -33,12 +33,35 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
       end)
       |> Map.new()
 
+    domain_to_service =
+      services
+      |> Enum.flat_map(fn {name, service} ->
+        service.domains
+        |> Enum.map(fn domain -> {domain, name} end)
+      end)
+      |> Map.new()
+
     services
     |> Enum.each(fn {name, _service} ->
       Process.send_after(self(), {:check, name}, mixed_config.ping_interval_ms)
     end)
 
-    {:ok, %{config: mixed_config, services: services}}
+    {:ok, %{config: mixed_config, services: services, domain_to_service: domain_to_service}}
+  end
+
+  @impl true
+  def handle_info({:check, name}, state) do
+    service = state.services[name]
+
+    health = check(service, state.config.timeout_ms)
+
+    service_updated = update_health(service, health)
+
+    save_update(service, service_updated)
+
+    Process.send_after(self(), {:check, service_updated.name}, state.config.ping_interval_ms)
+
+    {:noreply, put_in(state.services[name], service_updated)}
   end
 
   def healthy?(host_key) do
@@ -54,25 +77,45 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
   end
 
   @impl true
-  def handle_info({:check, name}, state) do
-    service = state.services[name]
+  def handle_cast({:set_unhealthy, host_key}, state) do
+    with {:ok, name} <- Map.fetch(state.domain_to_service, host_key) do
+      service = state.services[name]
+      service_updated = update_health(service, :ko)
+      save_update(service, service_updated)
+      {:noreply, put_in(state.services[name], service_updated)}
+    else
+      :error -> {:noreply, state}
+    end
+  end
 
+  def set_unhealthy(host_key) do
+    GenServer.cast(__MODULE__, {:set_unhealthy, host_key})
+  end
+
+  defp check(service, timeout) do
     response =
       Finch.build(
         :get,
         service.target <> service.health_path,
         if(service.health_domain, do: [{"host", service.health_domain}], else: [])
       )
-      |> Finch.request(ElixirGateway.HealthFinch, request_timeout: state.config.timeout_ms)
+      |> Finch.request(ElixirGateway.HealthFinch, request_timeout: timeout)
 
-    health =
-      case response do
-        {:ok, %Finch.Response{status: 200}} -> :ok
-        _ -> :ko
-      end
+    case response do
+      {:ok, %Finch.Response{status: 200}} ->
+        :ok
 
-    service_updated = update_health(service, health)
+      {:ok, %Finch.Response{} = response} ->
+        Logger.warning("Unhealthy service [#{service.name}]. Returned #{inspect(response)}")
+        :ko
 
+      {:error, err} ->
+        Logger.warning("Unhealthy service [#{service.name}]. Error ocurred: #{inspect(err)}")
+        :ko
+    end
+  end
+
+  defp save_update(service, service_updated) do
     if service.health != service_updated.health do
       service.domains
       |> Enum.each(fn domain ->
@@ -80,10 +123,6 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
         :ets.insert(@health_table, {domain, service_updated.health})
       end)
     end
-
-    Process.send_after(self(), {:check, service_updated.name}, state.config.ping_interval_ms)
-
-    {:noreply, %{state | services: %{state.services | service.name => service_updated}}}
   end
 
   defp update_health(%{health: :ok} = service, :ok) do
