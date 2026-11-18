@@ -18,7 +18,8 @@ this node but healthy on a peer, route its requests to the peer.
   the key nodes already agree on (`node_has_service?/2`); service names are local to
   each node's `gateway.yaml`.
 - **ETS, not GenServer state, for reads**: one writer (the GenServer), many readers
-  (request processes), `read_concurrency: true`. Missing entry = healthy.
+  (request processes), `read_concurrency: true`. Only down entries are stored
+  (`{{node, domain}, :ko}`); missing entry = healthy.
 - **Hysteresis**: down after 4 consecutive failures, up after 3 consecutive successes
   (thresholds hardcoded in `update_health/2` guards). Status values are `:ok` / `:ko`.
 - **One timer per service** instead of `Task.async_stream` over all services: each service
@@ -42,7 +43,8 @@ this node but healthy on a peer, route its requests to the peer.
       `services`, store it under `:gateway, :health`, `health_path` defaults to `"/health"`
 - [x] Call it from `apply_config/1`
 - [x] Getter `get_health_services/0` that always returns a map (`%{}` when unset)
-- [ ] Tests: default path and an override, `health_domain` for wildcard / default domains
+- [x] Tests: default path and an override, `health_domain` for wildcard / default domains
+- [x] `default` domain stored as `default_any` (same key as the routing map / `:service_key`)
 
 Learn: `Enum.map` / `Enum.flat_map`, `Map.get/3` defaults, keeping types in sync with code.
 
@@ -51,7 +53,7 @@ Learn: `Enum.map` / `Enum.flat_map`, `Map.get/3` defaults, keeping types in sync
 - [x] `check(service_check, timeout_ms) :: :ok | :ko`:
   URL `target <> health_path`, `Host` = `health_domain`, `request_timeout: timeout_ms`
 - [x] Log status / reason on failure
-- [ ] Tests with Bypass: 200 → `:ok`; 204, 500 → `:ko`; `Bypass.down/1` → `:ko`; `Host` header sent
+- [x] Tests with Bypass: 200 → `:ok`; 204, 500 → `:ko`; `Bypass.down/1` → `:ko`; `Host` header sent
 
 Learn: `Finch.build/4`, `Finch.request/3` (`receive_timeout`, `pool_timeout`), guards in
 `case`, supervision tree start order.
@@ -67,7 +69,7 @@ Learn: `Finch.build/4`, `Finch.request/3` (`receive_timeout`, `pool_timeout`), g
   - `Process.send_after(self(), {:check, name}, interval)` after the work finishes
 - [x] Start `ServiceHealth` in the supervision tree
 - [x] Public `healthy?(host_key)` reading ETS directly (healthy if missing or no table)
-- [ ] Tests for `update_health/2` thresholds (down on 4th failure, up on 3rd success)
+- [x] Tests for `update_health/2` thresholds (down on 4th failure, up on 3rd success)
 - [ ] Make the state a `%ServiceHealth{}` struct with `@type t`
 - [ ] `@spec` on `healthy?/1`
 
@@ -79,23 +81,58 @@ Try it: run the gateway, stop a backend, watch it go down and come back in the l
 ### 4. Quick detection in the request path
 - [x] `ServiceHealth.set_unhealthy(host)`: `cast`, maps host → service via `domain_to_service`,
       counts as one failure (still 4 to go down: a single error could be a blip)
-- [ ] Unknown host in `handle_cast` must not crash (use `Map.fetch` on `domain_to_service`)
-- [ ] In `RequestForwarder.forward_request`, on `%Mint.TransportError{reason: :econnrefused}`,
-      call `ServiceHealth.set_unhealthy/1`
+- [x] Unknown host in `handle_cast` must not crash (uses `Map.fetch` on `domain_to_service`)
+- [x] `RequestForwarder.forward_request` calls `ServiceHealth.set_unhealthy(conn.assigns[:service_key])`
+      in the `{:error, reason, conn}` branch. Note: this fires on **any** forwarding error
+      (timeouts included), not only `econnrefused`; 4 slow requests in a row would mark
+      the service down
 
 Learn: `cast` vs `call`; why a request process must never block on a background GenServer.
 
 ### 5. Share health with peers
-- [ ] On `:nodeup`, send the full table to the new peer (pattern: `LoadDistributor`'s `:nodeup`)
-- [ ] On each flip, send `{node(), host_key, status}` to all peers
-- [ ] `handle_rpc/1` stores peer entries keyed by `{node, host_key}`
-- [ ] On `:nodedown`, delete that node's entries
+ETS only holds **down** entries, `{{node, domain}, :ko}`, for this node and peers alike.
+A missing row = healthy. Messages are `GenServer.cast`/`abcast` from the `ServiceHealth`
+process itself (async, and ordered between two processes), not `RPC` + `Task`.
 
-Learn: `ElixirGateway.Cluster.RPC` (`rpc.ex`), `:net_kernel.monitor_nodes/1`,
-`:ets.match_delete/2`, message ordering (a change arriving before the full state).
+- [x] 5.1 Local keys: `save_update/2` inserts `{{node(), domain}, :ko}` on down and
+      deletes `{node(), domain}` on up; `healthy?(service_key, node)` looks up
+      `{node, service_key}` (no default for `node`: pass `node()` for local)
+- [x] 5.2 `down_domains(state)` helper: domains of services with `health: :ko`
+- [x] 5.3 `handle_cast({:peer_down_list, peer, domains})`: `match_delete {{peer, :_}, :_}`,
+      then insert `{{peer, d}, :ko}` for each
+- [x] 5.4 `handle_cast({:peer_update, peer, domains, :ko | :ok})`: insert or delete those rows
+- [x] 5.5 `init/1`: `:net_kernel.monitor_nodes(true)` (plain, not `node_type: :all`: we don't
+      read the `info` element, and hidden nodes like remote consoles never run
+      `ServiceHealth`; also consistent with `Node.list()`). Messages are 2-tuples
+- [x] 5.6 `handle_info({:nodeup, peer})`: cast `{:peer_down_list, node(), down_domains(state)}`
+      to `{__MODULE__, peer}`
+- [x] 5.7 `handle_info({:nodedown, peer})`: `match_delete {{peer, :_}, :_}`
+- [x] 5.8 `save_update/2`: on a flip, one `abcast(Node.list(), __MODULE__, {:peer_update, node(), domains, health})`
+      per flip (outside the per-domain loop). `Node.list()` explicitly, since the default
+      node list includes `node()` itself
+- [x] 5.9 `init/1`: `abcast(Node.list(), __MODULE__, {:sync_request, node()})`;
+      `handle_cast({:sync_request, peer})` replies with `:peer_down_list` (recovers peer
+      state after this process restarts)
+- [x] Catch-all `handle_cast/2` and `handle_info/2` clauses (log and ignore), so an
+      unexpected message (e.g. from a peer on another version during a rolling deploy)
+      doesn't crash the GenServer and wipe the table
+- [x] `@spec` on `healthy?/2`
+- [x] Tests (no second node needed), with a fake peer like `:fake@host`:
+  - `:peer_down_list` → `healthy?("a.com", :fake@host) == false`
+  - `:peer_update` with `:ok` → healthy again
+  - a second `:peer_down_list` without a domain replaces the old rows
+  - `{:nodedown, :fake@host}` → that peer's rows are gone
+
+Later hardening (step 6): a peer receiving a forwarded request for a service it knows is
+down replies `{:error, :service_down}`; the sender marks it and processes locally.
+
+Learn: `:net_kernel.monitor_nodes/1`, `GenServer.cast({name, node}, msg)` / `abcast/3`,
+`:ets.match_delete/2`, message ordering guarantees between two processes.
 
 ### 6. Routing
-- [ ] `DomainRouter` assigns the routing key it matched (e.g. `conn.assigns[:service_key]`)
+- [x] `DomainRouter` assigns the routing key it matched as `conn.assigns[:service_key]`
+      (`resolve_service_entry/1` returns `{service_key, target_url}`)
+- [x] Tests for `resolve_service_entry/1`: exact, wildcard and `default_any` keys
 - [ ] `LoadDistributionRouter`, before the load-distribution check, so failover works
       even when load distribution is off:
   - local down, peer healthy → `{:remote, peer}`

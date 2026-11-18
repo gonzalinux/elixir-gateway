@@ -224,6 +224,160 @@ defmodule ElixirGateway.ConfigLoaderTest do
 
   # --- timeouts ---
 
+  describe "load/0 health checks" do
+    setup do
+      path =
+        Path.join(System.tmp_dir!(), "gateway_test_#{System.unique_integer([:positive])}.yaml")
+
+      System.put_env("GATEWAY_CONFIG_FILE", path)
+
+      on_exit(fn ->
+        System.delete_env("GATEWAY_CONFIG_FILE")
+        File.rm(path)
+      end)
+
+      {:ok, path: path}
+    end
+
+    test "builds one health check per service, keyed by service name", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - myapp.com
+            - www.myapp.com
+        other:
+          target: http://localhost:5000
+          domains:
+            - other.com
+      """)
+
+      ConfigLoader.load()
+
+      health = ConfigLoader.get_health_services()
+      assert Map.keys(health) |> Enum.sort() == ["myapp", "other"]
+
+      assert %{
+               name: "myapp",
+               target: "http://localhost:4000",
+               domains: ["myapp.com", "www.myapp.com"]
+             } = health["myapp"]
+    end
+
+    test "health_path defaults to /health", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - myapp.com
+      """)
+
+      ConfigLoader.load()
+
+      assert ConfigLoader.get_health_services()["myapp"].health_path == "/health"
+    end
+
+    test "health_path can be overridden per service", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          health_path: /api/status
+          domains:
+            - myapp.com
+      """)
+
+      ConfigLoader.load()
+
+      assert ConfigLoader.get_health_services()["myapp"].health_path == "/api/status"
+    end
+
+    test "health_domain is the shortest domain", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - www.myapp.com
+            - myapp.com
+      """)
+
+      ConfigLoader.load()
+
+      assert ConfigLoader.get_health_services()["myapp"].health_domain == "myapp.com"
+    end
+
+    test "a wildcard domain becomes health.<domain> for health_domain", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - "*.myapp.com"
+      """)
+
+      ConfigLoader.load()
+
+      service = ConfigLoader.get_health_services()["myapp"]
+      assert service.health_domain == "health.myapp.com"
+      # domains keep the wildcard: they are the keys health is stored under
+      assert service.domains == ["*.myapp.com"]
+    end
+
+    test "domains given as maps (dns_challenge) are normalized to their name", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - name: "*.myapp.com"
+              dns_challenge: true
+      """)
+
+      ConfigLoader.load()
+
+      assert ConfigLoader.get_health_services()["myapp"].domains == ["*.myapp.com"]
+    end
+
+    test "a default-only service has no health_domain", %{path: path} do
+      File.write!(path, """
+      services:
+        fallback:
+          target: http://localhost:4000
+          domains:
+            - default
+      """)
+
+      ConfigLoader.load()
+
+      assert ConfigLoader.get_health_services()["fallback"].health_domain == nil
+    end
+
+    test "the default domain is stored as default_any, matching the routing key",
+         %{path: path} do
+      File.write!(path, """
+      services:
+        fallback:
+          target: http://localhost:4000
+          domains:
+            - default
+      """)
+
+      ConfigLoader.load()
+
+      # DomainRouter assigns "default_any" as :service_key, so health must use the same key
+      assert ConfigLoader.get_health_services()["fallback"].domains == ["default_any"]
+    end
+
+    test "returns an empty map when there are no health checks" do
+      Application.put_env(:elixirgateway, :gateway, services: %{})
+
+      assert ConfigLoader.get_health_services() == %{}
+    end
+  end
+
   describe "load/0 timeout resolution" do
     setup do
       path =

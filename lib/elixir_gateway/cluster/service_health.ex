@@ -46,7 +46,68 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
       Process.send_after(self(), {:check, name}, mixed_config.ping_interval_ms)
     end)
 
+    :net_kernel.monitor_nodes(true)
+    GenServer.abcast(Node.list(), __MODULE__, {:sync_request, node()})
     {:ok, %{config: mixed_config, services: services, domain_to_service: domain_to_service}}
+  end
+
+  @impl true
+  def handle_cast({:peer_down_list, peer, domains}, state) do
+    :ets.match_delete(@health_table, {{peer, :_}, :_})
+    Enum.each(domains, fn domain -> :ets.insert(@health_table, {{peer, domain}, :ko}) end)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:sync_request, peer}, state) do
+    GenServer.cast({__MODULE__, peer}, {:peer_down_list, node(), down_domains(state)})
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:peer_update, peer, domains, health}, state) do
+    domains
+    |> Enum.each(fn domain ->
+      case health do
+        :ok ->
+          :ets.delete(@health_table, {peer, domain})
+
+        :ko ->
+          :ets.insert(@health_table, {{peer, domain}, :ko})
+      end
+    end)
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:set_unhealthy, host_key}, state) do
+    with {:ok, name} <- Map.fetch(state.domain_to_service, host_key) do
+      service = state.services[name]
+      service_updated = update_health(service, :ko)
+      save_update(service, service_updated)
+      {:noreply, put_in(state.services[name], service_updated)}
+    else
+      :error -> {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_cast(msg, state) do
+    Logger.debug("ServiceHealth: ignoring unexpected cast #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodeup, peer}, state) do
+    GenServer.cast({__MODULE__, peer}, {:peer_down_list, node(), down_domains(state)})
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodedown, peer}, state) do
+    :ets.match_delete(@health_table, {{peer, :_}, :_})
+    {:noreply, state}
   end
 
   @impl true
@@ -64,35 +125,37 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
     {:noreply, put_in(state.services[name], service_updated)}
   end
 
-  def healthy?(host_key) do
-    try do
-      case :ets.lookup(@health_table, host_key) do
-        [{^host_key, :ko}] -> false
-        _ -> true
-      end
-    rescue
-      # if the table doesnt exist we will asume healthy just in case.
-      _ -> true
-    end
+  @impl true
+  def handle_info(msg, state) do
+    Logger.debug("ServiceHealth: ignoring unexpected info #{inspect(msg)}")
+    {:noreply, state}
   end
 
-  @impl true
-  def handle_cast({:set_unhealthy, host_key}, state) do
-    with {:ok, name} <- Map.fetch(state.domain_to_service, host_key) do
-      service = state.services[name]
-      service_updated = update_health(service, :ko)
-      save_update(service, service_updated)
-      {:noreply, put_in(state.services[name], service_updated)}
-    else
-      :error -> {:noreply, state}
+  @spec healthy?(host_key :: String.t(), node :: node()) :: boolean()
+  def healthy?(host_key, node \\ node()) do
+    case :ets.lookup(@health_table, {node, host_key}) do
+      [{{^node, ^host_key}, :ko}] -> false
+      _ -> true
     end
+  rescue
+    # if the table doesnt exist we will asume healthy just in case.
+    _ -> true
   end
 
   def set_unhealthy(host_key) do
     GenServer.cast(__MODULE__, {:set_unhealthy, host_key})
   end
 
-  defp check(service, timeout) do
+  defp down_domains(state) do
+    for {_name, %{health: :ko, domains: domains}} <- state.services,
+        domain <- domains do
+      domain
+    end
+  end
+
+  @doc false
+  @spec check(map(), non_neg_integer()) :: :ok | :ko
+  def check(service, timeout) do
     response =
       Finch.build(
         :get,
@@ -120,36 +183,48 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
       service.domains
       |> Enum.each(fn domain ->
         Logger.warning("Status of domain #{domain} changed to #{service_updated.health}")
-        :ets.insert(@health_table, {domain, service_updated.health})
+
+        case service_updated.health do
+          :ok -> :ets.delete(@health_table, {node(), domain})
+          :ko -> :ets.insert(@health_table, {{node(), domain}, :ko})
+        end
       end)
+
+      GenServer.abcast(
+        Node.list(),
+        __MODULE__,
+        {:peer_update, node(), service_updated.domains, service_updated.health}
+      )
     end
   end
 
-  defp update_health(%{health: :ok} = service, :ok) do
+  @doc false
+  @spec update_health(map(), :ok | :ko) :: map()
+  def update_health(%{health: :ok} = service, :ok) do
     %{service | ko_counter: 0}
   end
 
-  defp update_health(%{health: :ko} = service, :ko) do
+  def update_health(%{health: :ko} = service, :ko) do
     %{service | ok_counter: 0}
   end
 
-  defp update_health(%{health: :ko, ok_counter: ok_counter} = service, :ok)
-       when ok_counter < 2 do
+  def update_health(%{health: :ko, ok_counter: ok_counter} = service, :ok)
+      when ok_counter < 2 do
     %{service | ok_counter: service.ok_counter + 1}
   end
 
-  defp update_health(%{health: :ok, ko_counter: ko_counter} = service, :ko)
-       when ko_counter < 3 do
+  def update_health(%{health: :ok, ko_counter: ko_counter} = service, :ko)
+      when ko_counter < 3 do
     %{service | ko_counter: service.ko_counter + 1}
   end
 
-  defp update_health(%{health: :ko, ok_counter: ok_counter} = service, :ok)
-       when ok_counter >= 2 do
+  def update_health(%{health: :ko, ok_counter: ok_counter} = service, :ok)
+      when ok_counter >= 2 do
     %{service | ok_counter: 0, health: :ok}
   end
 
-  defp update_health(%{health: :ok, ko_counter: ko_counter} = service, :ko)
-       when ko_counter >= 3 do
+  def update_health(%{health: :ok, ko_counter: ko_counter} = service, :ko)
+      when ko_counter >= 3 do
     %{service | ko_counter: 0, health: :ko}
   end
 end

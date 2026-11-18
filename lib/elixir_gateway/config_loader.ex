@@ -255,8 +255,11 @@ defmodule ElixirGateway.ConfigLoader do
         domains =
           Map.get(service, "domains", [])
           |> Enum.map(fn domain ->
-            {domain, _other} = normalize_domain(domain)
-            domain
+            # Same key the routing map uses, so health lines up with :service_key
+            case normalize_domain(domain) do
+              {"default", _} -> "default_any"
+              {domain, _} -> domain
+            end
           end)
 
         health_domain =
