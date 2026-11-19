@@ -228,12 +228,16 @@ defmodule ElixirGateway.Cluster.ServiceHealthTest do
     # pointing at a Bypass backend, and short intervals so it flips quickly.
     setup do
       bypass = Bypass.open()
-      {:ok, status} = Agent.start_link(fn -> 200 end)
-      delay = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      # How the fake backend answers. Kept in :persistent_term (not an Agent) because
+      # checks can still hit Bypass after the test process exits, until on_exit runs.
+      backend = {__MODULE__, bypass.port}
+      :persistent_term.put(backend, %{status: 200, delay: 0})
 
       Bypass.stub(bypass, "GET", "/health", fn conn ->
-        Process.sleep(Agent.get(delay, & &1))
-        Plug.Conn.resp(conn, Agent.get(status, & &1), "")
+        %{status: code, delay: ms} = :persistent_term.get(backend)
+        Process.sleep(ms)
+        Plug.Conn.resp(conn, code, "")
       end)
 
       original_gateway = Application.get_env(:elixirgateway, :gateway)
@@ -262,9 +266,10 @@ defmodule ElixirGateway.Cluster.ServiceHealthTest do
         restore_env(:gateway, original_gateway)
         restore_env(:health, original_health)
         restart_service_health()
+        :persistent_term.erase(backend)
       end)
 
-      {:ok, status: status, delay: delay}
+      {:ok, backend: backend}
     end
 
     defp restart_service_health do
@@ -284,25 +289,28 @@ defmodule ElixirGateway.Cluster.ServiceHealthTest do
       end
     end
 
-    test "a failing backend goes down, and comes back up when it recovers", %{status: status} do
+    defp set_backend(backend, changes),
+      do: :persistent_term.put(backend, Map.merge(:persistent_term.get(backend), changes))
+
+    test "a failing backend goes down, and comes back up when it recovers", %{backend: backend} do
       eventually(fn -> ServiceHealth.statuses() == [{"loop_test", :ok}] end)
       assert ServiceHealth.healthy?("loop.test")
 
       capture_log(fn ->
-        Agent.update(status, fn _ -> 500 end)
+        set_backend(backend, %{status: 500})
         eventually(fn -> not ServiceHealth.healthy?("loop.test") end)
         assert ServiceHealth.statuses() == [{"loop_test", :ko}]
 
-        Agent.update(status, fn _ -> 200 end)
+        set_backend(backend, %{status: 200})
         eventually(fn -> ServiceHealth.healthy?("loop.test") end)
       end)
 
       assert ServiceHealth.statuses() == [{"loop_test", :ok}]
     end
 
-    test "the GenServer stays responsive while a check is in flight", %{delay: delay} do
+    test "the GenServer stays responsive while a check is in flight", %{backend: backend} do
       # Every check now takes 300ms; before checks ran in tasks, calls would wait for them
-      Agent.update(delay, fn _ -> 300 end)
+      set_backend(backend, %{delay: 300})
       Process.sleep(100)
 
       {micros, statuses} = :timer.tc(fn -> ServiceHealth.statuses() end)
@@ -311,8 +319,8 @@ defmodule ElixirGateway.Cluster.ServiceHealthTest do
       assert micros < 100_000
     end
 
-    test "only one check per service is in flight at a time", %{delay: delay} do
-      Agent.update(delay, fn _ -> 200 end)
+    test "only one check per service is in flight at a time", %{backend: backend} do
+      set_backend(backend, %{delay: 200})
       Process.sleep(500)
 
       assert map_size(:sys.get_state(ServiceHealth).tasks) <= 1
