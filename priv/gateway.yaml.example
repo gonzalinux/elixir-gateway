@@ -16,6 +16,11 @@ services:
   service1:
     timeout: 3.5
     target: http://localhost:8080
+    # Optional. Enables health checks: GET <target><health_path> every 1.5s, only a
+    # 200 counts as healthy. Down after 4 failed checks in a row, up after 3 successes.
+    # When down on this node and healthy on a peer, requests fail over to the peer.
+    # Services without health_path are never checked and never fail over.
+    health_path: /health
     domains:
       - "*.service1.com"
       - service1.com

@@ -31,18 +31,20 @@ ElixirGateway is a high-performance API Gateway built with Phoenix that serves a
 Internet → Bot Blocker → Rate Limiter → WebSocket Upgrade Check → Domain Router → Load Distribution Router → Request Forwarder
 ```
 
-**Note**: LoadDistributionRouter is only active when load distribution is enabled. When disabled, requests flow directly from DomainRouter to RequestForwarder.
+**Note**: LoadDistributionRouter's weight-based routing is only active when load distribution is enabled; when disabled it assigns `:local`. Health failover (see Service Health below) also only runs when load distribution is enabled.
 
 ### Core Components
 
 #### Plugs (Request Processing)
 - **`DomainRouter`** - Maps domains to target services based on configuration
+  - Assigns `:target_url` and `:service_key`, the routing key that matched (`"api.example.com"`, `"*.example.com"` or `"default_any"`) via `resolve_service_entry/1`. Health is keyed by `:service_key`, never by the raw request host
 - **`RateLimiter`** - Implements rate limiting (100 req/min default, uses Hammer)
 - **`LoadDistributionRouter`** - Routes requests across cluster nodes based on weights (optional)
   - Weight-based distribution for active-active load balancing
   - Session affinity preservation
   - Traffic threshold detection (routes locally below 20 req/min)
   - Dynamic adjustment when nodes connect/disconnect
+  - Health failover (`maybe_failover_with_health/2`) overrides `:target_node` when the chosen node's copy of the service is down
 - **`RequestForwarder`** - Forwards HTTP requests using Finch client
   - Streams request bodies to the backend (1MB chunks, 15-second timeout per chunk) instead of buffering them whole; bodies that fit in a single chunk are still sent as a plain binary
   - Streams backend responses to the client chunk by chunk (`Finch.stream_while/5` + `send_chunked`/`chunk`); empty responses (e.g. 204) are sent in one shot without chunked encoding
@@ -120,6 +122,47 @@ export MIN_REQ_THRESHOLD=20
 - `elixirgateway_load_distribution_enabled` - Feature status (1=on, 0=off)
 - `elixirgateway_load_distribution_below_threshold` - Traffic threshold status (1=below, 0=above)
 
+#### Service Health & Failover
+- **`ElixirGateway.Cluster.ServiceHealth`** - GenServer that health checks backends and shares the results with peers
+  - Started in the application tree (not the cluster supervisor), after its own Finch pool `ElixirGateway.HealthFinch`, so checks never queue behind real traffic
+- **Opt-in per service**: only services with a non-empty `health_path` in `gateway.yaml` are checked. No `health_path` = never marked down, never fails over
+  ```yaml
+  services:
+    mysite:
+      target: http://localhost:4000
+      health_path: /health
+      domains: [mysite.com, "*.mysite.com"]
+  ```
+- **Check**: `GET <target><health_path>` every 1.5s (`ping_interval_ms`), 500ms timeout (`timeout_ms`), both under `config :elixirgateway, :health`
+  - Only status **200** is healthy; anything else (204, 404, redirects, errors, timeouts) is a failure and logs the status/reason
+  - `Host` header = the service's `health_domain`: its shortest domain, with a leading `*` replaced by `health` (`*.mysite.com` → `health.mysite.com`); none for `default_any`
+- **Hysteresis**: down after **4** consecutive failures, up after **3** consecutive successes (`update_health/2` guards). A single error may be a blip
+- **Request path**: `RequestForwarder` calls `ServiceHealth.notify_unhealthy(service_key)` (a cast, never blocking the request) on any forwarding error. It counts as one failure, not an immediate down
+- **ETS table `:elixirgateway_service_health`** stores **only down rows**: `{{node, service_key}, :ko}`, for this node and for peers. A missing row = healthy
+  - Read with `ServiceHealth.healthy?(service_key, node \\ node())` directly from ETS (no GenServer call); `:protected`, only the GenServer writes
+  - Keys are the routing keys (`"default"` is stored as `"default_any"`), matching `conn.assigns[:service_key]`
+- **Peer sharing** uses `GenServer.cast({ServiceHealth, peer}, ...)` / `GenServer.abcast(Node.list(), ...)` from the GenServer itself (async, ordered between two processes), not `RPC`:
+  - On a status flip: `{:peer_update, node, domains, :ko | :ok}` to all peers (`:ok` deletes rows)
+  - On `:nodeup` and on `{:sync_request, node}` (broadcast from `init/1`, to recover after a restart): `{:peer_down_list, node, down_domains}`, which replaces everything known about that node
+  - On `:nodedown`: that node's rows are deleted (`:net_kernel.monitor_nodes(true)`, plain 2-tuple messages)
+  - Catch-all `handle_cast`/`handle_info` clauses, so messages from a peer on another version never crash it
+- **Failover rules** (`LoadDistributionRouter.maybe_failover_with_health/2`), applied after normal routing, **only when load distribution is enabled** (it needs `LoadDistributor` for `node_has_service?/2`, which isn't started otherwise):
+  - Target healthy → unchanged
+  - Local down → first peer (`Node.list()`) that is healthy **and** has the service (`LoadDistributor.node_has_service?/2`) → `{:remote, peer}`
+  - Pinned peer down → local if healthy, else another healthy peer
+  - Down everywhere → `:local`
+  - Sessions are **not** re-registered on failover, so traffic returns to the original node once it recovers
+- **Known limits**:
+  - Every node must use the same service keys (`*.example.com` on one node and `api.example.com` on another won't line up)
+  - WebSocket upgrades are handled by `WebSocketUpgradePlug` before routing, so they don't fail over
+  - `notify_unhealthy` fires on timeouts too: several slow requests in a row can mark a healthy service down
+- **Metrics** (`prom_ex/plugins/gateway.ex`):
+  - `elixirgateway_service_health_healthy{service, node_name}` - Gauge, 1=up 0=down, per service name, this node's services only (polled from `ServiceHealth.statuses/0`)
+  - `elixirgateway_service_health_transition_total{service, to}` - Status flips (`to` = `ok` | `ko`)
+  - `elixirgateway_service_health_failover_total{service_key, to}` - Requests rerouted by failover, by target node
+  - Counters only appear after their first event
+- Plan and remaining work: `docs/service-health-plan.md`
+
 #### Monitoring
 - **PromEx integration** with custom gateway metrics
   - `elixirgateway_request_total` - Counter with labels: method, status, target_service, path, host
@@ -127,6 +170,7 @@ export MIN_REQ_THRESHOLD=20
   - Path tracking sampled at 10% to manage cardinality
   - Cluster health metrics (peers connected, DNS failover state, session registry)
   - Load distribution metrics (node weights, request distribution, RPC latency)
+  - Service health metrics (per-service up/down, status flips, failover reroutes; see Service Health & Failover)
 - **`/metrics`** endpoint for Prometheus scraping
   - Token authentication (if `METRICS_AUTH_TOKEN` env var is set)
   - IP-based authentication (fallback, allows private networks only)

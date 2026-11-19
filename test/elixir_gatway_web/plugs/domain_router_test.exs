@@ -1,5 +1,6 @@
 defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
-  use ExUnit.Case, async: true
+  # Not async: tests change the global :gateway config
+  use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
 
@@ -204,6 +205,76 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouterTest do
       )
 
       assert DomainRouter.resolve_service("default") == nil
+    end
+  end
+
+  describe "resolve_service_entry/1" do
+    setup do
+      original_config = Application.get_env(:elixirgateway, :gateway)
+
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{
+          "api.example.com" => "http://backend1.local:8080",
+          "*.wildcard.com" => "http://wildcard.local:7070",
+          "default_any" => "http://fallback.local:4000"
+        }
+      )
+
+      on_exit(fn ->
+        if original_config do
+          Application.put_env(:elixirgateway, :gateway, original_config)
+        else
+          Application.delete_env(:elixirgateway, :gateway)
+        end
+      end)
+
+      :ok
+    end
+
+    test "returns the host itself as the key for an exact match" do
+      assert DomainRouter.resolve_service_entry("api.example.com") ==
+               {"api.example.com", "http://backend1.local:8080"}
+    end
+
+    test "returns the wildcard pattern as the key for a wildcard match" do
+      assert DomainRouter.resolve_service_entry("sub.wildcard.com") ==
+               {"*.wildcard.com", "http://wildcard.local:7070"}
+    end
+
+    test "returns default_any as the key for an unknown host" do
+      assert DomainRouter.resolve_service_entry("unknown.host.com") ==
+               {"default_any", "http://fallback.local:4000"}
+    end
+
+    test "prefers an exact match over a wildcard" do
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{
+          "*.wildcard.com" => "http://wildcard.local:7070",
+          "exact.wildcard.com" => "http://exact.local:9090"
+        }
+      )
+
+      assert DomainRouter.resolve_service_entry("exact.wildcard.com") ==
+               {"exact.wildcard.com", "http://exact.local:9090"}
+    end
+
+    test "returns nil when nothing matches and there is no default_any" do
+      Application.put_env(:elixirgateway, :gateway,
+        services: %{"api.example.com" => "http://backend1.local:8080"}
+      )
+
+      assert DomainRouter.resolve_service_entry("other.com") == nil
+    end
+
+    test "call/2 assigns the matched key as :service_key" do
+      conn =
+        conn(:get, "/")
+        |> Map.put(:host, "sub.wildcard.com")
+        |> DomainRouter.call([])
+
+      assert conn.assigns.service_key == "*.wildcard.com"
+      assert conn.assigns.target_url == "http://wildcard.local:7070"
+      assert conn.assigns.original_host == "sub.wildcard.com"
     end
   end
 

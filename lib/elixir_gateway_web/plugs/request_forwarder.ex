@@ -247,6 +247,8 @@ defmodule ElixirGatewayWeb.Plugs.RequestForwarder do
           Logger.error("Request forwarding failed: #{inspect(reason)}")
           log_request(conn, 502, duration)
 
+          ElixirGateway.Cluster.ServiceHealth.notify_unhealthy(conn.assigns[:service_key])
+
           conn
           |> put_resp_content_type("application/json")
           |> send_resp(502, Jason.encode!(%{error: "Service unavailable"}))

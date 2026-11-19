@@ -20,7 +20,8 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       session_registry_metrics(poll_rate),
 
       # Load distribution metrics
-      load_distribution_metrics(poll_rate)
+      load_distribution_metrics(poll_rate),
+      service_health_metrics(poll_rate)
     ]
   end
 
@@ -43,8 +44,26 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
       rpc_forwarding_metrics(),
 
       # Replacement for PromEx's :phoenix_http_event_metrics (dropped in config)
-      phoenix_http_metrics()
+      phoenix_http_metrics(),
+
+      # Service health event metrics
+      service_health_event_metrics()
     ]
+  end
+
+  defp service_health_event_metrics do
+    Event.build(:service_health_event_metrics, [
+      counter([:elixirgateway, :service_health, :transition, :total],
+        event_name: [:elixirgateway, :service_health, :transition],
+        description: "Health status changes of services checked",
+        tags: [:service, :to]
+      ),
+      counter([:elixirgateway, :service_health, :failover, :total],
+        event_name: [:elixirgateway, :service_health, :failover],
+        description: "Requests rerouted because their target's service was down",
+        tags: [:service_key, :to]
+      )
+    ])
   end
 
   # Same metric names as PromEx.Plugins.Phoenix so its Grafana dashboard keeps working,
@@ -245,6 +264,23 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           event_name: [:elixirgateway, :load_distribution, :below_threshold],
           description: "Whether traffic is below minimum threshold (1=yes, 0=no)",
           measurement: :status
+        )
+      ]
+    )
+  end
+
+  defp service_health_metrics(poll_rate) do
+    Polling.build(
+      :service_health_metrics,
+      poll_rate,
+      {__MODULE__, :execute_service_health, []},
+      [
+        last_value(
+          [:elixirgateway, :service_health, :healthy],
+          event_name: [:elixirgateway, :service_health, :healthy],
+          description: "Whether a health-checked service is up on this node (1=up, 0=down)",
+          measurement: :status,
+          tags: [:service, :node_name]
         )
       ]
     )
@@ -458,5 +494,17 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           )
         end)
     end
+  end
+
+  def execute_service_health do
+    for {name, health} <- ElixirGateway.Cluster.ServiceHealth.statuses() do
+      :telemetry.execute(
+        [:elixirgateway, :service_health, :healthy],
+        %{status: if(health == :ok, do: 1, else: 0)},
+        %{service: name, node_name: to_string(node())}
+      )
+    end
+  catch
+    :exit, _ -> :ok
   end
 end

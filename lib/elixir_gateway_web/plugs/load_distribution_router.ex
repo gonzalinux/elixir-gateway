@@ -21,7 +21,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
   import Plug.Conn
   require Logger
 
-  alias ElixirGateway.Cluster.{Config, ConnectionRegistry, LoadDistributor}
+  alias ElixirGateway.Cluster.{Config, ConnectionRegistry, LoadDistributor, ServiceHealth}
 
   @doc false
   def init(opts), do: opts
@@ -30,13 +30,84 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
   def call(conn, _opts) do
     if Config.load_distribution_enabled?() do
       route_with_load_distribution(conn)
+      |> maybe_failover_with_health()
     else
       # Load distribution disabled, always process locally
       assign(conn, :target_node, :local)
     end
   end
 
+  # Public only so tests can pass fake peers; Node.list() is empty in tests.
+  @doc false
+  @spec maybe_failover_with_health(Plug.Conn.t(), [node()]) :: Plug.Conn.t()
+  def maybe_failover_with_health(conn, peers \\ Node.list()) do
+    service_key = conn.assigns[:service_key]
+    target = conn.assigns[:target_node]
+
+    destination =
+      case target do
+        {:remote, remote_node} ->
+          case ServiceHealth.healthy?(service_key, remote_node) do
+            true ->
+              remote_node
+
+            false ->
+              get_healthy_node(service_key, [node() | peers])
+          end
+
+        :local ->
+          case ServiceHealth.healthy?(service_key) do
+            true ->
+              node()
+
+            false ->
+              get_healthy_node(service_key, peers)
+          end
+
+        _ ->
+          node()
+      end
+
+    represent = get_node_representation(destination)
+
+    if represent != conn.assigns[:target_node] do
+      Logger.info(
+        "Failing unhealthy host #{service_key} from target #{inspect(target)} to node #{inspect(represent)}"
+      )
+
+      :telemetry.execute(
+        [:elixirgateway, :service_health, :failover],
+        %{count: 1},
+        %{service_key: service_key, to: to_string(destination)}
+      )
+
+      assign(conn, :target_node, represent)
+    else
+      conn
+    end
+  end
+
   # Private Functions
+
+  defp get_healthy_node(_host, []) do
+    node()
+  end
+
+  defp get_healthy_node(host, [node | nodes]) do
+    if ServiceHealth.healthy?(host, node) and LoadDistributor.node_has_service?(node, host) do
+      node
+    else
+      get_healthy_node(host, nodes)
+    end
+  end
+
+  defp get_node_representation(node) do
+    if node == node() do
+      :local
+    else
+      {:remote, node}
+    end
+  end
 
   defp route_with_load_distribution(conn) do
     case ConnectionRegistry.get_node(conn) do
