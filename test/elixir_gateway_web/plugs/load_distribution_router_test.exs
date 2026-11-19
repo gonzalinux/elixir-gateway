@@ -3,7 +3,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
   import Plug.Test
 
   alias ElixirGatewayWeb.Plugs.LoadDistributionRouter
-  alias ElixirGateway.Cluster.{ConnectionRegistry, LoadDistributor}
+  alias ElixirGateway.Cluster.{ConnectionRegistry, LoadDistributor, ServiceHealth}
 
   setup do
     # Save original config
@@ -238,6 +238,174 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouterTest do
       conn = LoadDistributionRouter.call(conn, [])
 
       assert conn.assigns[:target_node] == :local
+    end
+  end
+
+  describe "health failover" do
+    # Each test gets its own service key and fake peers, so health rows never leak
+    # between tests. Health is faked through the same casts real peers send.
+    setup do
+      key = "svc#{System.unique_integer([:positive])}.test"
+      peer_a = :"peer_a_#{System.unique_integer([:positive])}@127.0.0.1"
+      peer_b = :"peer_b_#{System.unique_integer([:positive])}@127.0.0.1"
+
+      on_exit(fn ->
+        GenServer.cast(ServiceHealth, {:peer_update, node(), [key], :ok})
+        send(ServiceHealth, {:nodedown, peer_a})
+        send(ServiceHealth, {:nodedown, peer_b})
+        :sys.get_state(ServiceHealth)
+      end)
+
+      {:ok, key: key, peer_a: peer_a, peer_b: peer_b}
+    end
+
+    # Casts are async: the sync call returns once every earlier cast is handled
+    defp mark_down(node, key) do
+      GenServer.cast(ServiceHealth, {:peer_update, node, [key], :ko})
+      :sys.get_state(ServiceHealth)
+    end
+
+    # Tells LoadDistributor the peer serves these keys, so node_has_service?/2 is true
+    defp register_peer(peer, service_keys) do
+      GenServer.cast(
+        LoadDistributor,
+        {:remote_node_weight, %{node: peer, weight: 30, services: service_keys}}
+      )
+
+      :sys.get_state(LoadDistributor)
+    end
+
+    defp routed(key, target) do
+      conn(:get, "/test")
+      |> Plug.Conn.assign(:service_key, key)
+      |> Plug.Conn.assign(:target_node, target)
+    end
+
+    defp failover(conn, peers), do: LoadDistributionRouter.maybe_failover_with_health(conn, peers)
+
+    test "keeps :local when the local service is healthy", %{key: key, peer_a: peer_a} do
+      register_peer(peer_a, [key])
+
+      assert failover(routed(key, :local), [peer_a]).assigns.target_node == :local
+    end
+
+    test "keeps a healthy remote target", %{key: key, peer_a: peer_a} do
+      conn = failover(routed(key, {:remote, peer_a}), [peer_a])
+
+      assert conn.assigns.target_node == {:remote, peer_a}
+    end
+
+    test "local down: fails over to a healthy peer that has the service",
+         %{key: key, peer_a: peer_a} do
+      register_peer(peer_a, [key])
+      mark_down(node(), key)
+
+      assert failover(routed(key, :local), [peer_a]).assigns.target_node == {:remote, peer_a}
+    end
+
+    test "local down: skips a peer whose service is down", %{
+      key: key,
+      peer_a: peer_a,
+      peer_b: peer_b
+    } do
+      register_peer(peer_a, [key])
+      register_peer(peer_b, [key])
+      mark_down(node(), key)
+      mark_down(peer_a, key)
+
+      conn = failover(routed(key, :local), [peer_a, peer_b])
+
+      assert conn.assigns.target_node == {:remote, peer_b}
+    end
+
+    test "local down: skips a peer that does not serve the service", %{
+      key: key,
+      peer_a: peer_a
+    } do
+      register_peer(peer_a, ["other.test"])
+      mark_down(node(), key)
+
+      assert failover(routed(key, :local), [peer_a]).assigns.target_node == :local
+    end
+
+    test "local down and every peer down: stays :local", %{key: key, peer_a: peer_a} do
+      register_peer(peer_a, [key])
+      mark_down(node(), key)
+      mark_down(peer_a, key)
+
+      assert failover(routed(key, :local), [peer_a]).assigns.target_node == :local
+    end
+
+    test "local down and no peers: stays :local", %{key: key} do
+      mark_down(node(), key)
+
+      assert failover(routed(key, :local), []).assigns.target_node == :local
+    end
+
+    test "pinned peer down: falls back to the healthy local node", %{key: key, peer_a: peer_a} do
+      register_peer(peer_a, [key])
+      mark_down(peer_a, key)
+
+      assert failover(routed(key, {:remote, peer_a}), [peer_a]).assigns.target_node == :local
+    end
+
+    test "pinned peer down and local down: moves to another healthy peer", %{
+      key: key,
+      peer_a: peer_a,
+      peer_b: peer_b
+    } do
+      register_peer(peer_a, [key])
+      register_peer(peer_b, [key])
+      mark_down(peer_a, key)
+      mark_down(node(), key)
+
+      conn = failover(routed(key, {:remote, peer_a}), [peer_a, peer_b])
+
+      assert conn.assigns.target_node == {:remote, peer_b}
+    end
+
+    test "pinned peer down and everything else down: stays :local", %{
+      key: key,
+      peer_a: peer_a
+    } do
+      register_peer(peer_a, [key])
+      mark_down(peer_a, key)
+      mark_down(node(), key)
+
+      assert failover(routed(key, {:remote, peer_a}), [peer_a]).assigns.target_node == :local
+    end
+
+    test "only the failing service fails over", %{key: key, peer_a: peer_a} do
+      other_key = "other_#{key}"
+      register_peer(peer_a, [key, other_key])
+      mark_down(node(), key)
+
+      assert failover(routed(key, :local), [peer_a]).assigns.target_node == {:remote, peer_a}
+      assert failover(routed(other_key, :local), [peer_a]).assigns.target_node == :local
+    end
+
+    test "does not re-register the session on failover", %{key: key, peer_a: peer_a} do
+      session = {"127.0.0.1", "failover-session-#{key}"}
+
+      :ets.insert(
+        :elixirgateway_sticky_sessions,
+        {session, peer_a, System.system_time(:millisecond)}
+      )
+
+      mark_down(peer_a, key)
+
+      conn =
+        conn(:get, "/test")
+        |> Map.put(:remote_ip, {127, 0, 0, 1})
+        |> Plug.Conn.fetch_cookies()
+        |> Plug.Conn.put_req_header("x-session-id", "failover-session-#{key}")
+        |> Plug.Conn.assign(:service_key, key)
+        |> LoadDistributionRouter.call([])
+
+      # Through call/2: pinned to a peer whose service is down, so it is served locally...
+      assert conn.assigns.target_node == :local
+      # ...but the session stays pinned, so traffic returns to the peer once it recovers
+      assert [{^session, ^peer_a, _}] = :ets.lookup(:elixirgateway_sticky_sessions, session)
     end
   end
 end

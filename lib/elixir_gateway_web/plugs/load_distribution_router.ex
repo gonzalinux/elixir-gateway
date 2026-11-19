@@ -30,16 +30,17 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
   def call(conn, _opts) do
     if Config.load_distribution_enabled?() do
       route_with_load_distribution(conn)
+      |> maybe_failover_with_health()
     else
       # Load distribution disabled, always process locally
       assign(conn, :target_node, :local)
     end
-    |> maybe_failover_with_health()
   end
 
-  # Private Functions
-  #
-  defp maybe_failover_with_health(conn) do
+  # Public only so tests can pass fake peers; Node.list() is empty in tests.
+  @doc false
+  @spec maybe_failover_with_health(Plug.Conn.t(), [node()]) :: Plug.Conn.t()
+  def maybe_failover_with_health(conn, peers \\ Node.list()) do
     service_key = conn.assigns[:service_key]
     target = conn.assigns[:target_node]
 
@@ -51,7 +52,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
               remote_node
 
             false ->
-              get_healthy_node(service_key, [node() | Node.list()])
+              get_healthy_node(service_key, [node() | peers])
           end
 
         :local ->
@@ -60,8 +61,11 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
               node()
 
             false ->
-              get_healthy_node(service_key, Node.list())
+              get_healthy_node(service_key, peers)
           end
+
+        _ ->
+          node()
       end
 
     represent = get_node_representation(destination)
@@ -71,11 +75,19 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
         "Failing unhealthy host #{service_key} from target #{inspect(target)} to node #{inspect(represent)}"
       )
 
+      :telemetry.execute(
+        [:elixirgateway, :service_health, :failover],
+        %{count: 1},
+        %{service_key: service_key, to: to_string(destination)}
+      )
+
       assign(conn, :target_node, represent)
     else
       conn
     end
   end
+
+  # Private Functions
 
   defp get_healthy_node(_host, []) do
     node()

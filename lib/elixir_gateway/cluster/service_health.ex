@@ -52,6 +52,11 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
   end
 
   @impl true
+  def handle_call(:statuses, _from, state) do
+    {:reply, Enum.map(state.services, fn {name, s} -> {name, s.health} end), state}
+  end
+
+  @impl true
   def handle_cast({:peer_down_list, peer, domains}, state) do
     :ets.match_delete(@health_table, {{peer, :_}, :_})
     Enum.each(domains, fn domain -> :ets.insert(@health_table, {{peer, domain}, :ko}) end)
@@ -142,6 +147,10 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
     _ -> true
   end
 
+  def statuses do
+    GenServer.call(__MODULE__, :statuses)
+  end
+
   def set_unhealthy(host_key) do
     GenServer.cast(__MODULE__, {:set_unhealthy, host_key})
   end
@@ -195,6 +204,11 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
         __MODULE__,
         {:peer_update, node(), service_updated.domains, service_updated.health}
       )
+
+      :telemetry.execute([:elixirgateway, :service_health, :transition], %{count: 1}, %{
+        service: service.name,
+        to: to_string(service_updated.health)
+      })
     end
   end
 

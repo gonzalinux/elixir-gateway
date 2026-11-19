@@ -17,9 +17,11 @@ this node but healthy on a peer, route its requests to the peer.
   header: the shortest domain of the service, with a leading `*` replaced by `health`
   (`*.example.com` → `health.example.com`); none for `default`/`default_any`.
   Backends may route by host.
-- **Store and share results per host**: one ETS entry per domain of the service. Hosts are
-  the key nodes already agree on (`node_has_service?/2`); service names are local to
-  each node's `gateway.yaml`.
+- **Store and share results per routing key**: one ETS entry per domain of the service,
+  using the same keys as the routing map (`"*.example.com"`, `"default_any"`), which is
+  what `DomainRouter` assigns as `:service_key`. Keys are what nodes already agree on
+  (`node_has_service?/2`); service names are local to each node's `gateway.yaml`, and the
+  raw request host would never match a wildcard entry.
 - **ETS, not GenServer state, for reads**: one writer (the GenServer), many readers
   (request processes), `read_concurrency: true`. Only down entries are stored
   (`{{node, domain}, :ko}`); missing entry = healthy.
@@ -68,13 +70,13 @@ Learn: `Finch.build/4`, `Finch.request/3` (`receive_timeout`, `pool_timeout`), g
       (first check after one interval, instead of `handle_continue`)
 - [x] `handle_info({:check, name}, state)`:
   - Update counters via `update_health/2`; flip state at the thresholds
-  - On a flip, write `{domain, status}` to ETS for each of the service's domains; log it
+  - On a flip, update ETS for each of the service's domains (see 5.1); log it
   - `Process.send_after(self(), {:check, name}, interval)` after the work finishes
 - [x] Start `ServiceHealth` in the supervision tree
-- [x] Public `healthy?(host_key)` reading ETS directly (healthy if missing or no table)
+- [x] Public `healthy?(service_key, node \\ node())` reading ETS directly (healthy if
+      missing or no table)
 - [x] Tests for `update_health/2` thresholds (down on 4th failure, up on 3rd success)
-- [ ] Make the state a `%ServiceHealth{}` struct with `@type t`
-- [ ] `@spec` on `healthy?/1`
+- [x] `@spec` on `healthy?/2`
 
 Learn: `handle_continue` vs `send(self(), ...)`, scheduling after the work finishes,
 hysteresis.
@@ -99,7 +101,7 @@ process itself (async, and ordered between two processes), not `RPC` + `Task`.
 
 - [x] 5.1 Local keys: `save_update/2` inserts `{{node(), domain}, :ko}` on down and
       deletes `{node(), domain}` on up; `healthy?(service_key, node)` looks up
-      `{node, service_key}` (no default for `node`: pass `node()` for local)
+      `{node, service_key}`; `node` defaults to `node()`
 - [x] 5.2 `down_domains(state)` helper: domains of services with `health: :ko`
 - [x] 5.3 `handle_cast({:peer_down_list, peer, domains})`: `match_delete {{peer, :_}, :_}`,
       then insert `{{peer, d}, :ko}` for each
@@ -136,20 +138,49 @@ Learn: `:net_kernel.monitor_nodes/1`, `GenServer.cast({name, node}, msg)` / `abc
 - [x] `DomainRouter` assigns the routing key it matched as `conn.assigns[:service_key]`
       (`resolve_service_entry/1` returns `{service_key, target_url}`)
 - [x] Tests for `resolve_service_entry/1`: exact, wildcard and `default_any` keys
-- [ ] `LoadDistributionRouter`, before the load-distribution check, so failover works
-      even when load distribution is off:
-  - local down, peer healthy → `{:remote, peer}`
-  - pinned to a peer whose service is down → `:local`
+- [x] `LoadDistributionRouter.maybe_failover_with_health/2`, applied after normal routing
+      in `call/2`, only when load distribution is enabled:
+  - target healthy → unchanged
+  - local down, peer healthy and has the service (`node_has_service?/2`) → `{:remote, peer}`
+  - pinned to a peer whose service is down → `:local`, or another healthy peer if local is down
   - down everywhere → `:local`
-- [ ] Plug tests writing fake health entries to ETS
+  - a healthy target equal to `node()` becomes `:local` (never RPC to itself)
+  - sessions are not re-registered
+  - `Logger.info` on every rerouted request (kept on purpose for now; may be noisy in an outage)
+- [x] Plug tests (`load_distribution_router_test.exs`, "health failover"): fake peers passed
+      as the `peers` argument, registered in `LoadDistributor`, health set via `ServiceHealth` casts
+- [x] Failover only runs with load distribution enabled: `LoadDistributor` (needed for
+      `node_has_service?/2`) isn't started otherwise, and calling it would crash the request
 
 Learn: composing plugs, `Plug.Test`, keeping decisions in one place.
 
 ### 7. Metrics
-- [ ] `elixirgateway_service_healthy{service, node}` gauge in `prom_ex/plugins/gateway.ex`
-- [ ] Optional: counter for failover routing decisions
+All in `prom_ex/plugins/gateway.ex`. Not tested (decided not to test metrics).
+
+- [x] Gauge `elixirgateway_service_health_healthy{service, node_name}` (polling, every 5s):
+      1 = up, 0 = down, per service **name**, **this node's services only**. Peers aren't
+      reported: they only store down rows, so a recovered peer would stay at 0 forever
+      (`last_value` keeps the last value per label set). Each node is scraped, so Grafana
+      still has the cluster view
+  - `ServiceHealth.statuses/0` (`GenServer.call`) feeds it; `execute_service_health/0`
+    catches `:exit`, because `telemetry_poller` permanently drops a measurement whose
+    function raises (a slow call during an outage would kill the gauge until restart)
+- [x] Counter `elixirgateway_service_health_transition_total{service, to}`: one per status
+      flip (`to` = `"ok"` | `"ko"`), fired in `save_update/2` once per flip
+- [x] Counter `elixirgateway_service_health_failover_total{service_key, to}`: one per
+      rerouted request (`to` = target node), fired in `maybe_failover_with_health/2`
+- Gotchas: the metric name (first arg) ends in `:total`, the `event_name` doesn't and must
+  match the `:telemetry.execute` call exactly; counters have no series until their first
+  event; labels only from config (never request host/path/IP)
 
 Learn: PromEx polling vs event metrics, label cardinality.
+
+### Left for later
+- [ ] Make the `ServiceHealth` state a `%ServiceHealth{}` struct with `@type t`
+- [ ] Hardening: a peer receiving a forwarded request for a service it knows is down replies
+      `{:error, :service_down}`; the sender marks it and processes locally
+- [ ] `set_unhealthy` on `econnrefused` only (today: any forwarding error, timeouts included)
+- [ ] Failover for WebSocket upgrades (handled by `WebSocketUpgradePlug` before routing)
 
 ## Along the way
 - `mix dialyzer` after each step
