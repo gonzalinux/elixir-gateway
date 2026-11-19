@@ -84,10 +84,10 @@ hysteresis.
 Try it: run the gateway, stop a backend, watch it go down and come back in the logs.
 
 ### 4. Quick detection in the request path
-- [x] `ServiceHealth.set_unhealthy(host)`: `cast`, maps host → service via `domain_to_service`,
+- [x] `ServiceHealth.notify_unhealthy(host)`: `cast`, maps host → service via `domain_to_service`,
       counts as one failure (still 4 to go down: a single error could be a blip)
 - [x] Unknown host in `handle_cast` must not crash (uses `Map.fetch` on `domain_to_service`)
-- [x] `RequestForwarder.forward_request` calls `ServiceHealth.set_unhealthy(conn.assigns[:service_key])`
+- [x] `RequestForwarder.forward_request` calls `ServiceHealth.notify_unhealthy(conn.assigns[:service_key])`
       in the `{:error, reason, conn}` branch. Note: this fires on **any** forwarding error
       (timeouts included), not only `econnrefused`; 4 slow requests in a row would mark
       the service down
@@ -179,7 +179,7 @@ Learn: PromEx polling vs event metrics, label cardinality.
 - [ ] Make the `ServiceHealth` state a `%ServiceHealth{}` struct with `@type t`
 - [ ] Hardening: a peer receiving a forwarded request for a service it knows is down replies
       `{:error, :service_down}`; the sender marks it and processes locally
-- [ ] `set_unhealthy` on `econnrefused` only (today: any forwarding error, timeouts included)
+- [ ] `notify_unhealthy` on `econnrefused` only (today: any forwarding error, timeouts included)
 - [ ] Failover for WebSocket upgrades (handled by `WebSocketUpgradePlug` before routing)
 
 ## Along the way

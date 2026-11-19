@@ -223,6 +223,102 @@ defmodule ElixirGateway.Cluster.ServiceHealthTest do
     end
   end
 
+  describe "check loop" do
+    # These tests restart the application's ServiceHealth with one configured service
+    # pointing at a Bypass backend, and short intervals so it flips quickly.
+    setup do
+      bypass = Bypass.open()
+      {:ok, status} = Agent.start_link(fn -> 200 end)
+      delay = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      Bypass.stub(bypass, "GET", "/health", fn conn ->
+        Process.sleep(Agent.get(delay, & &1))
+        Plug.Conn.resp(conn, Agent.get(status, & &1), "")
+      end)
+
+      original_gateway = Application.get_env(:elixirgateway, :gateway)
+      original_health = Application.get_env(:elixirgateway, :health)
+
+      health_services = %{
+        "loop_test" => %{
+          name: "loop_test",
+          target: "http://localhost:#{bypass.port}",
+          domains: ["loop.test"],
+          health_path: "/health",
+          health_domain: "loop.test"
+        }
+      }
+
+      Application.put_env(
+        :elixirgateway,
+        :gateway,
+        Keyword.put(original_gateway || [], :health, health_services)
+      )
+
+      Application.put_env(:elixirgateway, :health, ping_interval_ms: 20, timeout_ms: 500)
+      restart_service_health()
+
+      on_exit(fn ->
+        restore_env(:gateway, original_gateway)
+        restore_env(:health, original_health)
+        restart_service_health()
+      end)
+
+      {:ok, status: status, delay: delay}
+    end
+
+    defp restart_service_health do
+      :ok = Supervisor.terminate_child(ElixirGateway.Supervisor, ServiceHealth)
+      {:ok, _pid} = Supervisor.restart_child(ElixirGateway.Supervisor, ServiceHealth)
+    end
+
+    defp restore_env(key, nil), do: Application.delete_env(:elixirgateway, key)
+    defp restore_env(key, value), do: Application.put_env(:elixirgateway, key, value)
+
+    # Polls until fun returns true, or fails after ~2s
+    defp eventually(fun, attempts \\ 100) do
+      cond do
+        fun.() -> true
+        attempts == 0 -> flunk("condition never became true")
+        true -> Process.sleep(20) && eventually(fun, attempts - 1)
+      end
+    end
+
+    test "a failing backend goes down, and comes back up when it recovers", %{status: status} do
+      eventually(fn -> ServiceHealth.statuses() == [{"loop_test", :ok}] end)
+      assert ServiceHealth.healthy?("loop.test")
+
+      capture_log(fn ->
+        Agent.update(status, fn _ -> 500 end)
+        eventually(fn -> not ServiceHealth.healthy?("loop.test") end)
+        assert ServiceHealth.statuses() == [{"loop_test", :ko}]
+
+        Agent.update(status, fn _ -> 200 end)
+        eventually(fn -> ServiceHealth.healthy?("loop.test") end)
+      end)
+
+      assert ServiceHealth.statuses() == [{"loop_test", :ok}]
+    end
+
+    test "the GenServer stays responsive while a check is in flight", %{delay: delay} do
+      # Every check now takes 300ms; before checks ran in tasks, calls would wait for them
+      Agent.update(delay, fn _ -> 300 end)
+      Process.sleep(100)
+
+      {micros, statuses} = :timer.tc(fn -> ServiceHealth.statuses() end)
+
+      assert statuses == [{"loop_test", :ok}]
+      assert micros < 100_000
+    end
+
+    test "only one check per service is in flight at a time", %{delay: delay} do
+      Agent.update(delay, fn _ -> 200 end)
+      Process.sleep(500)
+
+      assert map_size(:sys.get_state(ServiceHealth).tasks) <= 1
+    end
+  end
+
   test "unexpected messages do not crash the process" do
     pid = Process.whereis(ServiceHealth)
 

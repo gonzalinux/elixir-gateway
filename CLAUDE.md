@@ -137,7 +137,7 @@ export MIN_REQ_THRESHOLD=20
   - Only status **200** is healthy; anything else (204, 404, redirects, errors, timeouts) is a failure and logs the status/reason
   - `Host` header = the service's `health_domain`: its shortest domain, with a leading `*` replaced by `health` (`*.mysite.com` → `health.mysite.com`); none for `default_any`
 - **Hysteresis**: down after **4** consecutive failures, up after **3** consecutive successes (`update_health/2` guards). A single error may be a blip
-- **Request path**: `RequestForwarder` calls `ServiceHealth.set_unhealthy(service_key)` (a cast, never blocking the request) on any forwarding error. It counts as one failure, not an immediate down
+- **Request path**: `RequestForwarder` calls `ServiceHealth.notify_unhealthy(service_key)` (a cast, never blocking the request) on any forwarding error. It counts as one failure, not an immediate down
 - **ETS table `:elixirgateway_service_health`** stores **only down rows**: `{{node, service_key}, :ko}`, for this node and for peers. A missing row = healthy
   - Read with `ServiceHealth.healthy?(service_key, node \\ node())` directly from ETS (no GenServer call); `:protected`, only the GenServer writes
   - Keys are the routing keys (`"default"` is stored as `"default_any"`), matching `conn.assigns[:service_key]`
@@ -155,7 +155,7 @@ export MIN_REQ_THRESHOLD=20
 - **Known limits**:
   - Every node must use the same service keys (`*.example.com` on one node and `api.example.com` on another won't line up)
   - WebSocket upgrades are handled by `WebSocketUpgradePlug` before routing, so they don't fail over
-  - `set_unhealthy` fires on timeouts too: several slow requests in a row can mark a healthy service down
+  - `notify_unhealthy` fires on timeouts too: several slow requests in a row can mark a healthy service down
 - **Metrics** (`prom_ex/plugins/gateway.ex`):
   - `elixirgateway_service_health_healthy{service, node_name}` - Gauge, 1=up 0=down, per service name, this node's services only (polled from `ServiceHealth.statuses/0`)
   - `elixirgateway_service_health_transition_total{service, to}` - Status flips (`to` = `ok` | `ko`)

@@ -4,6 +4,7 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
   use GenServer
 
   @health_table :elixirgateway_service_health
+  @task_supervisor ElixirGateway.Cluster.ServiceHealth.TaskSupervisor
   @default_timeout_ms 500
   @default_ping_interval_ms 1500
   def start_link(opts) do
@@ -48,7 +49,15 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
 
     :net_kernel.monitor_nodes(true)
     GenServer.abcast(Node.list(), __MODULE__, {:sync_request, node()})
-    {:ok, %{config: mixed_config, services: services, domain_to_service: domain_to_service}}
+
+    {:ok,
+     %{
+       config: mixed_config,
+       services: services,
+       domain_to_service: domain_to_service,
+       # Running health checks: task ref => service name
+       tasks: %{}
+     }}
   end
 
   @impl true
@@ -86,7 +95,7 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
   end
 
   @impl true
-  def handle_cast({:set_unhealthy, host_key}, state) do
+  def handle_cast({:notify_unhealthy, host_key}, state) do
     with {:ok, name} <- Map.fetch(state.domain_to_service, host_key) do
       service = state.services[name]
       service_updated = update_health(service, :ko)
@@ -115,19 +124,38 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
     {:noreply, state}
   end
 
+  # The HTTP request runs in a task so the GenServer never blocks on it: checks run in
+  # parallel, and casts / peer messages / statuses/0 are handled while checks are in flight.
+  # async_nolink: a crashing task sends us a :DOWN instead of taking this process down.
   @impl true
   def handle_info({:check, name}, state) do
     service = state.services[name]
+    timeout = state.config.timeout_ms
 
-    health = check(service, state.config.timeout_ms)
+    task = Task.Supervisor.async_nolink(@task_supervisor, fn -> check(service, timeout) end)
 
-    service_updated = update_health(service, health)
+    {:noreply, put_in(state.tasks[task.ref], name)}
+  end
 
-    save_update(service, service_updated)
+  # A check finished. The next one is only scheduled now, so there is at most one check
+  # per service in flight, even when a backend is slow.
+  @impl true
+  def handle_info({ref, health}, state) when is_map_key(state.tasks, ref) do
+    # Stop monitoring the finished task and drop its :DOWN message
+    Process.demonitor(ref, [:flush])
+    {name, tasks} = Map.pop(state.tasks, ref)
 
-    Process.send_after(self(), {:check, service_updated.name}, state.config.ping_interval_ms)
+    {:noreply, apply_check_result(%{state | tasks: tasks}, name, health)}
+  end
 
-    {:noreply, put_in(state.services[name], service_updated)}
+  # The check task crashed (an unexpected exception): count it as a failed check
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state)
+      when is_map_key(state.tasks, ref) do
+    {name, tasks} = Map.pop(state.tasks, ref)
+    Logger.warning("Health check task for [#{name}] crashed: #{inspect(reason)}")
+
+    {:noreply, apply_check_result(%{state | tasks: tasks}, name, :ko)}
   end
 
   @impl true
@@ -151,8 +179,23 @@ defmodule ElixirGateway.Cluster.ServiceHealth do
     GenServer.call(__MODULE__, :statuses)
   end
 
-  def set_unhealthy(host_key) do
-    GenServer.cast(__MODULE__, {:set_unhealthy, host_key})
+  @doc """
+  Reports a failed request to the service behind `service_key` (from the request path).
+  Counts as one failed check; a cast, so the caller never waits.
+  """
+  @spec notify_unhealthy(String.t() | nil) :: :ok
+  def notify_unhealthy(service_key) do
+    GenServer.cast(__MODULE__, {:notify_unhealthy, service_key})
+  end
+
+  defp apply_check_result(state, name, health) do
+    service = state.services[name]
+    service_updated = update_health(service, health)
+    save_update(service, service_updated)
+
+    Process.send_after(self(), {:check, name}, state.config.ping_interval_ms)
+
+    put_in(state.services[name], service_updated)
   end
 
   defp down_domains(state) do
