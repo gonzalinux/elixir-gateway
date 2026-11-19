@@ -244,11 +244,13 @@ defmodule ElixirGateway.ConfigLoaderTest do
       services:
         myapp:
           target: http://localhost:4000
+          health_path: /health
           domains:
             - myapp.com
             - www.myapp.com
         other:
           target: http://localhost:5000
+          health_path: /health
           domains:
             - other.com
       """)
@@ -265,21 +267,43 @@ defmodule ElixirGateway.ConfigLoaderTest do
              } = health["myapp"]
     end
 
-    test "health_path defaults to /health", %{path: path} do
+    test "services without health_path get no health check", %{path: path} do
+      File.write!(path, """
+      services:
+        checked:
+          target: http://localhost:4000
+          health_path: /health
+          domains:
+            - checked.com
+        unchecked:
+          target: http://localhost:5000
+          domains:
+            - unchecked.com
+      """)
+
+      ConfigLoader.load()
+
+      health = ConfigLoader.get_health_services()
+      assert Map.has_key?(health, "checked")
+      refute Map.has_key?(health, "unchecked")
+    end
+
+    test "an empty health_path does not enable the health check", %{path: path} do
       File.write!(path, """
       services:
         myapp:
           target: http://localhost:4000
+          health_path: ""
           domains:
             - myapp.com
       """)
 
       ConfigLoader.load()
 
-      assert ConfigLoader.get_health_services()["myapp"].health_path == "/health"
+      assert ConfigLoader.get_health_services() == %{}
     end
 
-    test "health_path can be overridden per service", %{path: path} do
+    test "uses the configured health_path", %{path: path} do
       File.write!(path, """
       services:
         myapp:
@@ -299,6 +323,7 @@ defmodule ElixirGateway.ConfigLoaderTest do
       services:
         myapp:
           target: http://localhost:4000
+          health_path: /health
           domains:
             - www.myapp.com
             - myapp.com
@@ -314,6 +339,7 @@ defmodule ElixirGateway.ConfigLoaderTest do
       services:
         myapp:
           target: http://localhost:4000
+          health_path: /health
           domains:
             - "*.myapp.com"
       """)
@@ -331,6 +357,7 @@ defmodule ElixirGateway.ConfigLoaderTest do
       services:
         myapp:
           target: http://localhost:4000
+          health_path: /health
           domains:
             - name: "*.myapp.com"
               dns_challenge: true
@@ -346,6 +373,7 @@ defmodule ElixirGateway.ConfigLoaderTest do
       services:
         fallback:
           target: http://localhost:4000
+          health_path: /health
           domains:
             - default
       """)
@@ -361,6 +389,7 @@ defmodule ElixirGateway.ConfigLoaderTest do
       services:
         fallback:
           target: http://localhost:4000
+          health_path: /health
           domains:
             - default
       """)

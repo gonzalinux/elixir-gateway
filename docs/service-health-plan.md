@@ -1,12 +1,15 @@
 # Service Health Checks & Failover — Plan
 
-Goal: ping every service's `/health` endpoint every ~1.5s. When a service is down on
+Goal: ping the health endpoint of every service that opts in every ~1.5s. When a service is down on
 this node but healthy on a peer, route its requests to the peer.
 
 ## Decisions
 
-- **HTTP checks only**, `GET <target><health_path>`; `health_path` defaults to `/health`,
-  overridable per service in `gateway.yaml`.
+- **HTTP checks only**, `GET <target><health_path>`.
+- **Opt-in per service: setting `health_path` in `gateway.yaml` enables the check.** No
+  `health_path` (or an empty one) = no check, never marked down, never fails over. A
+  default would mark every service without a `/health` endpoint down (404) and move its
+  traffic around.
 - **Only exactly 200 is healthy.** Anything else (204, 404, a redirect...) from a dedicated
   health endpoint means something is misconfigured: mark down and log the status.
 - **Separate Finch pool** (`ElixirGateway.HealthFinch`), so checks never wait behind real traffic.
@@ -40,7 +43,7 @@ this node but healthy on a peer, route its requests to the peer.
 ### 1. Data the checker needs (`config_loader.ex`)
 - [x] `service_health_check()` type: `name`, `target`, `domains`, `health_path`, `health_domain`
 - [x] Implement `apply_health_checks/1`: build a map keyed by service name in a pass over
-      `services`, store it under `:gateway, :health`, `health_path` defaults to `"/health"`
+      `services` with a non-empty `health_path`, store it under `:gateway, :health`
 - [x] Call it from `apply_config/1`
 - [x] Getter `get_health_services/0` that always returns a map (`%{}` when unset)
 - [x] Tests: default path and an override, `health_domain` for wildcard / default domains

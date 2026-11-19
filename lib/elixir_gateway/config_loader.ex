@@ -251,6 +251,9 @@ defmodule ElixirGateway.ConfigLoader do
   defp apply_health_checks(services) do
     health_map =
       services
+      # Health checks are opt-in: only services that set a health_path are checked.
+      # Services without one are never marked down, so they never fail over.
+      |> Enum.filter(fn {_name, service} -> health_check_enabled?(service) end)
       |> Enum.map(fn {name, service} ->
         domains =
           Map.get(service, "domains", [])
@@ -279,7 +282,7 @@ defmodule ElixirGateway.ConfigLoader do
         {name,
          %{
            name: name,
-           health_path: Map.get(service, "health_path", "/health"),
+           health_path: Map.fetch!(service, "health_path"),
            health_domain: health_domain,
            domains: domains,
            target: Map.fetch!(service, "target")
@@ -292,6 +295,11 @@ defmodule ElixirGateway.ConfigLoader do
 
     :ok
   end
+
+  defp health_check_enabled?(%{"health_path" => path}) when is_binary(path) and path != "",
+    do: true
+
+  defp health_check_enabled?(_service), do: false
 
   # Builds a host-keyed map of path matchers (regex + method + timeout), mirroring
   # apply_services so DomainRouter can resolve a timeout the same way it resolves a target.

@@ -21,7 +21,7 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
   import Plug.Conn
   require Logger
 
-  alias ElixirGateway.Cluster.{Config, ConnectionRegistry, LoadDistributor}
+  alias ElixirGateway.Cluster.{Config, ConnectionRegistry, LoadDistributor, ServiceHealth}
 
   @doc false
   def init(opts), do: opts
@@ -34,9 +34,68 @@ defmodule ElixirGatewayWeb.Plugs.LoadDistributionRouter do
       # Load distribution disabled, always process locally
       assign(conn, :target_node, :local)
     end
+    |> maybe_failover_with_health()
   end
 
   # Private Functions
+  #
+  defp maybe_failover_with_health(conn) do
+    service_key = conn.assigns[:service_key]
+    target = conn.assigns[:target_node]
+
+    destination =
+      case target do
+        {:remote, remote_node} ->
+          case ServiceHealth.healthy?(service_key, remote_node) do
+            true ->
+              remote_node
+
+            false ->
+              get_healthy_node(service_key, [node() | Node.list()])
+          end
+
+        :local ->
+          case ServiceHealth.healthy?(service_key) do
+            true ->
+              node()
+
+            false ->
+              get_healthy_node(service_key, Node.list())
+          end
+      end
+
+    represent = get_node_representation(destination)
+
+    if represent != conn.assigns[:target_node] do
+      Logger.info(
+        "Failing unhealthy host #{service_key} from target #{inspect(target)} to node #{inspect(represent)}"
+      )
+
+      assign(conn, :target_node, represent)
+    else
+      conn
+    end
+  end
+
+  defp get_healthy_node(_host, []) do
+    node()
+  end
+
+  defp get_healthy_node(host, [node | nodes]) do
+    if ServiceHealth.healthy?(host, node) and LoadDistributor.node_has_service?(node, host) do
+      node
+    else
+      get_healthy_node(host, nodes)
+    end
+  end
+
+  defp get_node_representation(node) do
+    if node == node() do
+      :local
+    else
+      {:remote, node}
+    end
+  end
 
   defp route_with_load_distribution(conn) do
     case ConnectionRegistry.get_node(conn) do
