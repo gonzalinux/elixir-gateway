@@ -42,6 +42,10 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
 
       # RPC forwarding metrics
       rpc_forwarding_metrics(),
+
+      # Replacement for PromEx's :phoenix_http_event_metrics (dropped in config)
+      phoenix_http_metrics(),
+
       # Service health event metrics
       service_health_event_metrics()
     ]
@@ -60,6 +64,81 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
         tags: [:service_key, :to]
       )
     ])
+  end
+
+  # Same metric names as PromEx.Plugins.Phoenix so its Grafana dashboard keeps working,
+  # but the host label is bounded via DomainRouter.metrics_host/1. PromEx tags the raw
+  # conn.host, which let bots probing random hostnames create thousands of series.
+  @phoenix_stop_event [:prom_ex, :plugin, :phoenix, :stop]
+  @phoenix_http_tags [:status, :method, :path, :controller, :action, :host]
+
+  defp phoenix_http_metrics do
+    prefix = PromEx.metric_prefix(:elixirgateway, :phoenix)
+
+    Event.build(
+      :gateway_phoenix_http_event_metrics,
+      [
+        distribution(
+          prefix ++ [:http, :request, :duration, :milliseconds],
+          event_name: @phoenix_stop_event,
+          measurement: :duration,
+          description: "The time it takes for the application to respond to HTTP requests.",
+          reporter_options: [buckets: [10, 100, 500, 1_000, 5_000, 10_000, 30_000]],
+          tag_values: &phoenix_conn_tags/1,
+          tags: @phoenix_http_tags,
+          unit: {:native, :millisecond}
+        ),
+        distribution(
+          prefix ++ [:http, :response, :size, :bytes],
+          event_name: @phoenix_stop_event,
+          description: "The size of the HTTP response payload.",
+          reporter_options: [
+            buckets: [64, 512, 4_096, 65_536, 262_144, 1_048_576, 4_194_304, 16_777_216]
+          ],
+          measurement: fn _measurements, %{conn: conn} ->
+            if conn.resp_body, do: :erlang.iolist_size(conn.resp_body), else: 0
+          end,
+          tag_values: &phoenix_conn_tags/1,
+          tags: @phoenix_http_tags,
+          unit: :byte
+        ),
+        counter(
+          prefix ++ [:http, :requests, :total],
+          event_name: @phoenix_stop_event,
+          description: "The number of requests have been serviced.",
+          tag_values: &phoenix_conn_tags/1,
+          tags: @phoenix_http_tags
+        )
+      ]
+    )
+  end
+
+  @doc false
+  def phoenix_conn_tags(%{conn: %Plug.Conn{} = conn}) do
+    # The path label is the router pattern (e.g. "/*path"), never the raw request path
+    route_tags =
+      case Phoenix.Router.route_info(
+             ElixirGatewayWeb.Router,
+             conn.method,
+             conn.request_path,
+             conn.host
+           ) do
+        %{route: route, plug: plug, plug_opts: action} ->
+          %{
+            path: route,
+            controller: plug |> Atom.to_string() |> String.trim_leading("Elixir."),
+            action: if(is_atom(action), do: Atom.to_string(action), else: "Unknown")
+          }
+
+        :error ->
+          %{path: "Unknown", controller: "Unknown", action: "Unknown"}
+      end
+
+    Map.merge(route_tags, %{
+      status: conn.status,
+      method: conn.method,
+      host: ElixirGatewayWeb.Plugs.DomainRouter.metrics_host(conn.host)
+    })
   end
 
   defp rate_limit_event_metrics do
@@ -215,7 +294,7 @@ defmodule ElixirGateway.PromEx.Plugins.Gateway do
           [:elixirgateway, :request, :total],
           event_name: [:elixirgateway, :request, :complete],
           description: "Total number of requests processed",
-          tags: [:method, :status, :target_service, :path, :host]
+          tags: [:method, :status, :target_service, :host]
         ),
         distribution(
           [:elixirgateway, :request, :duration, :milliseconds],

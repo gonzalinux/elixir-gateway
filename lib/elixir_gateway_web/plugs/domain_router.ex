@@ -74,6 +74,46 @@ defmodule ElixirGatewayWeb.Plugs.DomainRouter do
     end)
   end
 
+  @doc """
+  Maps a request host to a bounded label for Prometheus metrics.
+
+  Only hosts registered in the gateway services produce their own label, so bots
+  probing random hostnames cannot inflate metric cardinality:
+
+    * exact match (or the apex of a wildcard entry) → the lowercased host
+    * other wildcard match → the wildcard pattern, e.g. `"*example.com"`
+    * anything else (including hosts only caught by `default_any`) → `"unregistered"`
+  """
+  def metrics_host(nil), do: "unregistered"
+
+  def metrics_host(host) when is_binary(host) do
+    host = host |> String.split(":") |> List.first() |> String.downcase()
+    services = Application.get_env(:elixirgateway, :gateway)[:services] || %{}
+
+    cond do
+      host not in ["default", "default_any"] and Map.has_key?(services, host) ->
+        host
+
+      pattern = find_wildcard_pattern(services, host) ->
+        if host == wildcard_suffix(pattern), do: host, else: pattern
+
+      true ->
+        "unregistered"
+    end
+  end
+
+  defp find_wildcard_pattern(services, host) do
+    Enum.find_value(services, fn
+      {"*" <> suffix = pattern, _target} ->
+        if String.ends_with?(host, suffix), do: pattern
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp wildcard_suffix("*" <> suffix), do: String.trim_leading(suffix, ".")
+
   defp force_https?(host) do
     force_https_map = Application.get_env(:elixirgateway, :gateway)[:force_https] || %{}
 

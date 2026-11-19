@@ -1,8 +1,10 @@
 // Grafana Alloy config — tails JSON logs from elixir-gateway and forwards to a Loki-compatible aggregator
 
 local.file_match "gateway" {
-  // Match base file and OTP-rotated files (.0, .1, .2)
-  path_targets = [{"__path__" = "/app/logs/app.json.log*"}]
+  // Tail only the live file. OTP rotates by renaming (app.json.log -> .0 -> .1 -> .2),
+  // and Alloy tracks positions per path, so matching the rotated files re-ingests
+  // every line once per rename. Alloy detects the rotation and reopens the new file.
+  path_targets = [{"__path__" = "/app/logs/app.json.log"}]
 }
 
 loki.source.file "gateway" {
