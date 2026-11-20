@@ -73,6 +73,42 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewalTest do
     end
   end
 
+  describe "needs_wildcard_renewal?/1" do
+    test "returns true when no cert file exists on disk" do
+      assert CertRenewal.needs_wildcard_renewal?("no-cert.example") == true
+    end
+
+    test "returns true when the cert is valid but does not cover the wildcard",
+         %{temp_dir: temp_dir} do
+      # e.g. an HTTP-01 cert issued before the domain was switched to dns_challenge
+      domain = "http01-only.example"
+      live_dir = Path.join([temp_dir, "live", domain])
+      File.mkdir_p!(live_dir)
+      generate_cert(Path.join(live_dir, "fullchain.pem"), domain, 90, [domain])
+
+      assert CertRenewal.needs_wildcard_renewal?(domain) == true
+    end
+
+    test "returns false when the cert covers the wildcard and is valid",
+         %{temp_dir: temp_dir} do
+      domain = "wildcard-ok.example"
+      live_dir = Path.join([temp_dir, "live", domain])
+      File.mkdir_p!(live_dir)
+      generate_cert(Path.join(live_dir, "fullchain.pem"), domain, 90, [domain, "*.#{domain}"])
+
+      assert CertRenewal.needs_wildcard_renewal?(domain) == false
+    end
+
+    test "returns true when the wildcard cert expires within 30 days", %{temp_dir: temp_dir} do
+      domain = "wildcard-expiring.example"
+      live_dir = Path.join([temp_dir, "live", domain])
+      File.mkdir_p!(live_dir)
+      generate_cert(Path.join(live_dir, "fullchain.pem"), domain, 15, [domain, "*.#{domain}"])
+
+      assert CertRenewal.needs_wildcard_renewal?(domain) == true
+    end
+  end
+
   describe "run/0 — secondary node" do
     test "skips renewal and logs debug on secondary node" do
       System.put_env("IS_PRIMARY", "false")
@@ -126,8 +162,14 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewalTest do
   defp restore_env(key, nil), do: Application.delete_env(:elixirgateway, key)
   defp restore_env(key, val), do: Application.put_env(:elixirgateway, key, val)
 
-  defp generate_cert(cert_path, cn, days) do
+  defp generate_cert(cert_path, cn, days, sans \\ []) do
     key_path = cert_path <> ".key"
+
+    san_args =
+      case sans do
+        [] -> []
+        _ -> ["-addext", "subjectAltName=" <> Enum.map_join(sans, ",", &"DNS:#{&1}")]
+      end
 
     {_, 0} =
       System.cmd(
@@ -148,7 +190,7 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewalTest do
           Integer.to_string(days),
           "-subj",
           "/CN=#{cn}"
-        ],
+        ] ++ san_args,
         stderr_to_stdout: true
       )
   end

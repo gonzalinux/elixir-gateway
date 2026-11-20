@@ -6,11 +6,13 @@ defmodule ElixirGateway.ConfigLoaderTest do
   setup do
     original_gateway = Application.get_env(:elixirgateway, :gateway)
     original_domains = Application.get_env(:elixirgateway, :letsencrypt_domains)
+    original_dns_domains = Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains)
     original_cluster = Application.get_env(:elixirgateway, :cluster)
 
     on_exit(fn ->
       restore_or_delete(:gateway, original_gateway)
       restore_or_delete(:letsencrypt_domains, original_domains)
+      restore_or_delete(:letsencrypt_wildcard_domains, original_dns_domains)
       restore_or_delete(:cluster, original_cluster)
     end)
 
@@ -91,6 +93,68 @@ defmodule ElixirGateway.ConfigLoaderTest do
       assert "secure.com" in domains
       refute "*.secure.com" in domains
       refute "insecure.com" in domains
+    end
+
+    test "dns_challenge on the wildcard entry requests DNS-01 for its apex", %{path: path} do
+      File.write!(path, """
+      services:
+        garage:
+          target: http://localhost:3900
+          domains:
+            - name: "*.garage.example.com"
+              dns_challenge: true
+            - garage.example.com
+          ssl: true
+      """)
+
+      ConfigLoader.load()
+
+      assert Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains) == [
+               "garage.example.com"
+             ]
+
+      # the apex is covered by the DNS-01 cert, so it must not also be requested over HTTP-01
+      assert Application.get_env(:elixirgateway, :letsencrypt_domains) == []
+    end
+
+    test "dns_challenge on both the wildcard and the apex requests one DNS-01 cert",
+         %{path: path} do
+      File.write!(path, """
+      services:
+        writeinone:
+          target: http://localhost:9000
+          domains:
+            - name: "*.writeinone.example"
+              dns_challenge: true
+            - name: writeinone.example
+              dns_challenge: true
+            - blog.example.io
+          ssl: true
+      """)
+
+      ConfigLoader.load()
+
+      assert Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains) == [
+               "writeinone.example"
+             ]
+
+      assert Application.get_env(:elixirgateway, :letsencrypt_domains) == ["blog.example.io"]
+    end
+
+    test "a wildcard without dns_challenge is not requested at all", %{path: path} do
+      File.write!(path, """
+      services:
+        myapp:
+          target: http://localhost:4000
+          domains:
+            - "*.myapp.example"
+          ssl: true
+      """)
+
+      ConfigLoader.load()
+
+      assert Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains) == []
+      assert Application.get_env(:elixirgateway, :letsencrypt_domains) == []
     end
 
     test "force_https defaults to true when ssl: true", %{path: path} do

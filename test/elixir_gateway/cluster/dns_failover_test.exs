@@ -31,4 +31,18 @@ defmodule ElixirGateway.Cluster.DNSFailoverTest do
     assert Process.alive?(pid)
     assert %{last_state: :failed} = DNSFailover.status()
   end
+
+  describe "loggable_domains/1" do
+    test "lists host.domain and provider without the DDNS password" do
+      domains = [
+        %{host: "@", domain: "example.com", password: "secret-namecheap-pass"},
+        %{host: "garage", domain: "example.org", password: "cloudflare"}
+      ]
+
+      line = DNSFailover.loggable_domains(domains)
+
+      assert line == "example.com (namecheap), garage.example.org (cloudflare)"
+      refute line =~ "secret-namecheap-pass"
+    end
+  end
 end

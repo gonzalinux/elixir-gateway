@@ -101,7 +101,10 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     # If this is the primary node and domains are configured, claim DNS on startup
     state =
       if is_primary?() and domains != [] do
-        Logger.info("Primary node starting up, claiming DNS for domains: #{inspect(domains)}")
+        Logger.info(
+          "Primary node starting up, claiming DNS for domains: #{loggable_domains(domains)}"
+        )
+
         {_result, updated_state} = perform_dns_update(state)
         updated_state
       else
@@ -328,6 +331,17 @@ defmodule ElixirGateway.Cluster.DNSFailover do
     nc_results = if nc_domains != [], do: Namecheap.update_all(nc_domains, ip), else: []
 
     cf_results ++ nc_results
+  end
+
+  @doc false
+  # Domains for logging: "host.domain (provider)", never the Namecheap DDNS password.
+  @spec loggable_domains([map()]) :: String.t()
+  def loggable_domains(domains) do
+    Enum.map_join(domains, ", ", fn %{host: host, domain: domain} = entry ->
+      name = if host == "@", do: domain, else: "#{host}.#{domain}"
+      provider = if entry[:password] == "cloudflare", do: "cloudflare", else: "namecheap"
+      "#{name} (#{provider})"
+    end)
   end
 
   defp fetch_public_ip do
