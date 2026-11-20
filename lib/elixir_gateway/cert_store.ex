@@ -59,6 +59,17 @@ defmodule ElixirGateway.CertStore do
     end
   end
 
+  @doc """
+  DNS names (SANs) in the certbot cert stored under `domain`, or `[]` if
+  there is no readable cert.
+  """
+  def cert_names(domain) do
+    case File.read(Path.join([certbot_live_dir(), domain, "fullchain.pem"])) do
+      {:ok, pem} -> cert_sans(pem)
+      _ -> []
+    end
+  end
+
   # — GenServer callbacks —
 
   @impl true

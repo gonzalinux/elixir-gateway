@@ -19,7 +19,7 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewal do
       dns_domains = Application.get_env(:elixirgateway, :letsencrypt_wildcard_domains, [])
 
       http_due = Enum.filter(http_domains, &needs_renewal?/1)
-      dns_due = Enum.filter(dns_domains, &needs_renewal?/1)
+      dns_due = Enum.filter(dns_domains, &needs_wildcard_renewal?/1)
 
       total = length(http_domains) + length(dns_domains)
       total_due = length(http_due) + length(dns_due)
@@ -44,6 +44,16 @@ defmodule ElixirGateway.Cluster.Jobs.CertRenewal do
       :no_cert -> true
       days -> days < @renew_within_days
     end
+  end
+
+  @doc """
+  Like `needs_renewal?/1`, but also true when the cert under `apex_domain`
+  doesn't cover `*.apex_domain` (e.g. an HTTP-01 cert issued before the
+  domain was switched to dns_challenge).
+  """
+  def needs_wildcard_renewal?(apex_domain) do
+    needs_renewal?(apex_domain) or
+      "*.#{apex_domain}" not in ElixirGateway.CertStore.cert_names(apex_domain)
   end
 
   defp primary_node?, do: ElixirGateway.Cluster.Role.primary?()

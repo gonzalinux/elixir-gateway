@@ -161,23 +161,15 @@ defmodule ElixirGateway.ConfigLoader do
         normalized = service |> Map.get("domains", []) |> Enum.map(&normalize_domain/1)
 
         {new_http, new_dns} =
-          if ssl_enabled?(service) do
-            eligible =
-              Enum.reject(normalized, fn {name, _} ->
-                String.starts_with?(name, "*") or name == "default"
-              end)
-
-            {dns_entries, http_entries} = Enum.split_with(eligible, fn {_, dns?} -> dns? end)
-
-            {Enum.map(http_entries, &elem(&1, 0)), Enum.map(dns_entries, &elem(&1, 0))}
-          else
-            {[], []}
-          end
+          if ssl_enabled?(service), do: split_ssl_domains(normalized), else: {[], []}
 
         new_https = Map.new(normalized, fn {name, _} -> {name, ssl_force_https?(service)} end)
 
         {http_acc ++ new_http, dns_acc ++ new_dns, Map.merge(https_acc, new_https)}
       end)
+
+    dns_domains = Enum.uniq(dns_domains)
+    http_domains = http_domains |> Enum.uniq() |> Enum.reject(&(&1 in dns_domains))
 
     Application.put_env(:elixirgateway, :letsencrypt_domains, http_domains)
     Application.put_env(:elixirgateway, :letsencrypt_wildcard_domains, dns_domains)
@@ -346,6 +338,25 @@ defmodule ElixirGateway.ConfigLoader do
       end)
 
     path_matchers ++ [%{pattern: ~r/.*/, method: ".*", timeout: default_timeout}]
+  end
+
+  # Splits a service's domains into {HTTP-01 hosts, DNS-01 apexes}.
+  # A dns_challenge entry is issued as one cert for "apex" + "*.apex", so
+  # "*.example.com" and "example.com" both map to the apex "example.com".
+  # Wildcards without dns_challenge can't be issued over HTTP-01 and are skipped.
+  @spec split_ssl_domains([{String.t(), boolean()}]) :: {[String.t()], [String.t()]}
+  defp split_ssl_domains(normalized) do
+    {dns_entries, http_entries} =
+      normalized
+      |> Enum.reject(fn {name, _} -> name == "default" end)
+      |> Enum.split_with(fn {_, dns?} -> dns? end)
+
+    dns = Enum.map(dns_entries, fn {name, _} -> String.replace_prefix(name, "*.", "") end)
+
+    http =
+      for {name, _} <- http_entries, not String.starts_with?(name, "*"), do: name
+
+    {http, dns}
   end
 
   # Domain entries can be a plain string or a map with name + optional dns_challenge flag.
