@@ -29,8 +29,11 @@ this node but healthy on a peer, route its requests to the peer.
   (thresholds hardcoded in `update_health/2` guards). Status values are `:ok` / `:ko`.
 - **One timer per service** instead of `Task.async_stream` over all services: each service
   schedules its own `{:check, name}` message, so a slow service doesn't hold back the
-  others' schedules. Checks still run one at a time inside the GenServer (each can block
-  it for up to `timeout_ms`).
+  others' schedules. The HTTP request runs in a `Task.Supervisor.async_nolink` task
+  (`ServiceHealth.TaskSupervisor`), so the GenServer never blocks on it: checks run in
+  parallel, and casts, peer messages and `statuses/0` are handled while checks are in
+  flight. The next check is scheduled when the result arrives, so there is at most one
+  check per service in flight; a crashed task (`:DOWN`) counts as a failed check.
 - **Failover doesn't re-register sessions**: traffic returns on its own once the service recovers.
 
 ## Steps

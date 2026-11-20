@@ -124,7 +124,8 @@ export MIN_REQ_THRESHOLD=20
 
 #### Service Health & Failover
 - **`ElixirGateway.Cluster.ServiceHealth`** - GenServer that health checks backends and shares the results with peers
-  - Started in the application tree (not the cluster supervisor), after its own Finch pool `ElixirGateway.HealthFinch`, so checks never queue behind real traffic
+  - Started in the application tree (not the cluster supervisor), after its own Finch pool `ElixirGateway.HealthFinch` (so checks never queue behind real traffic) and `ServiceHealth.TaskSupervisor`
+  - Each check's HTTP request runs in a `Task.Supervisor.async_nolink` task; the GenServer only handles the result (`{ref, result}`, or `:DOWN` = failed check). Checks run in parallel and never block casts, peer messages or `statuses/0`. The next check is scheduled when the result arrives, so at most one check per service is in flight
 - **Opt-in per service**: only services with a non-empty `health_path` in `gateway.yaml` are checked. No `health_path` = never marked down, never fails over
   ```yaml
   services:
